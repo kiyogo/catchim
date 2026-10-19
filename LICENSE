@@ -4,11 +4,11 @@ Copyright (c) 2026 KIYO GROUP (https://github.com/kiyogo)
 
 This project contains two primary modules:
 
-1. Catchim App (`app/`):
+1. Catchim App:
    Native C++ desktop application and WebAssembly engine target developed independently by KIYO GROUP.
    Copyright (c) 2026 KIYO GROUP.
 
-2. Catchim Web (`web/`):
+2. Catchim Web:
    Web-based video editor interface derived from OpenCut (https://github.com/OpenCut-app/OpenCut).
    Copyright (c) OpenCut Contributors.
    Copyright (c) 2026 KIYO GROUP.
