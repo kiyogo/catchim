@@ -11,7 +11,7 @@ const Tooltip = TooltipPrimitive.Root;
 const TooltipTrigger = TooltipPrimitive.Trigger;
 
 const tooltipVariants = cva(
-	"z-50 overflow-visible rounded-sm text-sm shadow-md",
+	"z-300 overflow-visible rounded-sm text-sm shadow-md",
 	{
 		variants: {
 			variant: {

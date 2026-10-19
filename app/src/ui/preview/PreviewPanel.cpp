@@ -3,9 +3,11 @@
 #if defined(HAVE_QT6)
 #include "ui/icons/UiIcons.h"
 #include "ui/theme/Theme.h"
+#include "ui/widgets/WebComboBox.h"
 #include "core/time/Timecode.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 
 namespace catchim::ui {
 
@@ -26,111 +28,64 @@ PreviewPanel::PreviewPanel(
 
 void PreviewPanel::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setContentsMargins(1, 1, 1, 1);
     mainLayout->setSpacing(0);
 
     mainLayout->addWidget(previewWidget_, 1);
 
-    // Preview Toolbar
+    // Preview Toolbar (Matches web/src/preview/components/toolbar.tsx)
     auto* toolbar = new QWidget(this);
     toolbar->setObjectName("previewToolbar");
-    toolbar->setFixedHeight(44);
-    auto* tbLayout = new QHBoxLayout(toolbar);
-    tbLayout->setContentsMargins(12, 4, 12, 4);
-    tbLayout->setSpacing(8);
+    toolbar->setFixedHeight(64);
+    auto* tbLayout = new QGridLayout(toolbar);
+    tbLayout->setContentsMargins(20, 20, 20, 12);
+    tbLayout->setHorizontalSpacing(0);
+    tbLayout->setColumnStretch(0, 1);
+    tbLayout->setColumnStretch(2, 1);
 
-    // Timecode display
+    // Left: Timecode display
+    const auto& pal = Theme::instance().palette();
     timecodeLabel_ = new QLabel("00:00:00:00 / 00:00:00:00", toolbar);
     timecodeLabel_->setObjectName("timecodeLabel");
-    tbLayout->addWidget(timecodeLabel_);
+    timecodeLabel_->setTextFormat(Qt::RichText);
+    tbLayout->addWidget(timecodeLabel_, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
 
-    tbLayout->addStretch();
-
-    const auto& pal = Theme::instance().palette();
-    auto makeIconTbBtn = [toolbar, pal](UiIcon icon, const QString& tip) {
-        auto* btn = new QPushButton(toolbar);
-        btn->setFixedSize(32, 32);
-        btn->setIcon(UiIcons::get(icon, pal.textPrimary, 16));
-        btn->setIconSize(QSize(16, 16));
-        btn->setToolTip(tip);
-        return btn;
-    };
-
-    auto* jumpStartBtn = makeIconTbBtn(UiIcon::SkipBack, "Về đầu video (Home)");
-    connect(jumpStartBtn, &QPushButton::clicked, [this]() {
-        engine_.seek(core::TimelineTime::zero());
-        refresh();
-    });
-    tbLayout->addWidget(jumpStartBtn);
-
-    auto* prevFrameBtn = makeIconTbBtn(UiIcon::StepBack, "Lùi 1 khung hình (Trái)");
-    connect(prevFrameBtn, &QPushButton::clicked, [this]() {
-        const auto& fps = engine_.project().settings().fps;
-        core::TimelineTime cur = engine_.playback().currentTime();
-        core::TimelineTime step = core::TimelineTime::fromSeconds(1.0 / (fps.denominator > 0 ? static_cast<double>(fps.numerator)/fps.denominator : 30.0));
-        engine_.seek(cur > step ? cur - step : core::TimelineTime::zero());
-        refresh();
-    });
-    tbLayout->addWidget(prevFrameBtn);
-
-    // Play / Pause button
+    // Center: Play / Pause button (Single ghost icon button)
     playPauseBtn_ = new QPushButton(toolbar);
-    playPauseBtn_->setFixedSize(36, 32);
-    playPauseBtn_->setIcon(UiIcons::get(UiIcon::Play, QColor("#ffffff"), 16));
-    playPauseBtn_->setIconSize(QSize(16, 16));
-    playPauseBtn_->setToolTip("Phát / Tạm dừng (Space)");
-    playPauseBtn_->setStyleSheet(R"(
-        QPushButton {
-            background-color: #0284c7;
-            border: 1px solid #0284c7;
-            border-radius: 6px;
-            padding: 0;
-        }
-        QPushButton:hover {
-            background-color: #0369a1;
-            border-color: #38bdf8;
-        }
-    )");
+    playPauseBtn_->setObjectName("previewPlayBtn");
+    playPauseBtn_->setFixedSize(32, 32);
+    playPauseBtn_->setIcon(UiIcons::get(UiIcon::Play, pal.textPrimary, 18));
+    playPauseBtn_->setIconSize(QSize(18, 18));
+    playPauseBtn_->setCursor(Qt::PointingHandCursor);
     connect(playPauseBtn_, &QPushButton::clicked, this, &PreviewPanel::onPlayPauseClicked);
-    tbLayout->addWidget(playPauseBtn_);
+    tbLayout->addWidget(playPauseBtn_, 0, 1);
 
-    auto* nextFrameBtn = makeIconTbBtn(UiIcon::StepForward, "Tiến 1 khung hình (Phải)");
-    connect(nextFrameBtn, &QPushButton::clicked, [this]() {
-        const auto& fps = engine_.project().settings().fps;
-        core::TimelineTime cur = engine_.playback().currentTime();
-        core::TimelineTime step = core::TimelineTime::fromSeconds(1.0 / (fps.denominator > 0 ? static_cast<double>(fps.numerator)/fps.denominator : 30.0));
-        engine_.seek(cur + step);
-        refresh();
-    });
-    tbLayout->addWidget(nextFrameBtn);
+    auto* rightSection = new QWidget(toolbar);
+    auto* rightLayout = new QHBoxLayout(rightSection);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+    rightLayout->setSpacing(10);
 
-    auto* jumpEndBtn = makeIconTbBtn(UiIcon::SkipForward, "Đến cuối video (End)");
-    connect(jumpEndBtn, &QPushButton::clicked, [this]() {
-        engine_.seek(engine_.project().totalDuration());
-        refresh();
-    });
-    tbLayout->addWidget(jumpEndBtn);
-
-    tbLayout->addStretch();
-
-    // Zoom combo
-    zoomCombo_ = new QComboBox(toolbar);
-    zoomCombo_->addItems({"Fit", "25%", "50%", "75%", "100%", "150%", "200%"});
-    zoomCombo_->setFixedWidth(84);
+    // Right: Zoom combo + Separator + Fullscreen
+    zoomCombo_ = new WebComboBox(toolbar);
+    zoomCombo_->setObjectName("previewZoomCombo");
+    zoomCombo_->addItems({"Vừa khung", "25%", "50%", "75%", "100%", "150%", "200%"});
+    zoomCombo_->setFixedWidth(106);
+    zoomCombo_->setFixedHeight(28);
     connect(zoomCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &PreviewPanel::onZoomChanged);
-    tbLayout->addWidget(zoomCombo_);
+    rightLayout->addWidget(zoomCombo_);
 
-    // Safe Zones toggle button
-    auto* safeZoneBtn = makeIconTbBtn(UiIcon::Target, "Bật/Tắt khung an toàn (Safe Zones 90% & 80%)");
-    safeZoneBtn->setCheckable(true);
-    connect(safeZoneBtn, &QPushButton::clicked, [this, safeZoneBtn]() {
-        previewWidget_->toggleSafeZones();
-        safeZoneBtn->setChecked(previewWidget_->isSafeZonesEnabled());
-    });
-    tbLayout->addWidget(safeZoneBtn);
+    auto* sep = new QFrame(toolbar);
+    sep->setFixedWidth(1);
+    sep->setFixedHeight(16);
+    sep->setStyleSheet(QString("background-color: %1;").arg(pal.border.name()));
+    rightLayout->addWidget(sep);
 
-    // Fullscreen toggle button
-    auto* fsBtn = makeIconTbBtn(UiIcon::Fullscreen, "Toàn màn hình (F11)");
+    auto* fsBtn = new QPushButton(toolbar);
+    fsBtn->setObjectName("previewFsBtn");
+    fsBtn->setFixedSize(32, 32);
+    fsBtn->setIcon(UiIcons::get(UiIcon::Fullscreen, pal.textSecondary, 16));
+    fsBtn->setIconSize(QSize(16, 16));
+    fsBtn->setCursor(Qt::PointingHandCursor);
     connect(fsBtn, &QPushButton::clicked, [this]() {
         QWidget* top = window();
         if (top) {
@@ -141,7 +96,8 @@ void PreviewPanel::setupUi() {
             }
         }
     });
-    tbLayout->addWidget(fsBtn);
+    rightLayout->addWidget(fsBtn);
+    tbLayout->addWidget(rightSection, 0, 2, Qt::AlignRight | Qt::AlignVCenter);
 
     mainLayout->addWidget(toolbar);
 }
@@ -154,11 +110,51 @@ void PreviewPanel::refresh() {
     std::string curTc = core::Timecode::format(curTime, core::TimecodeFormat::HH_MM_SS_FF, fps);
     std::string durTc = core::Timecode::format(dur, core::TimecodeFormat::HH_MM_SS_FF, fps);
 
-    timecodeLabel_->setText(QString::fromStdString(curTc + " / " + durTc));
+    const auto& pal = Theme::instance().palette();
+    QString tcHtml = QString("<span style=\"color: %1;\">%2</span> <span style=\"color: %3;\">/ %4</span>")
+        .arg(pal.primaryAccent.name())
+        .arg(QString::fromStdString(curTc))
+        .arg(pal.textSecondary.name())
+        .arg(QString::fromStdString(durTc));
+    timecodeLabel_->setText(tcHtml);
     playPauseBtn_->setIcon(engine_.playback().isPlaying() ?
-        UiIcons::get(UiIcon::Pause, QColor("#ffffff"), 16) :
-        UiIcons::get(UiIcon::Play, QColor("#ffffff"), 16));
-    previewWidget_->update();
+        UiIcons::get(UiIcon::Pause, pal.textPrimary, 18) :
+        UiIcons::get(UiIcon::Play, pal.textPrimary, 18));
+
+    // For non-playback refresh (seek, clip add, selection change):
+    // decode the frame now so it shows up immediately
+    if (previewWidget_) {
+        previewWidget_->updateFrameIfNeeded();
+    }
+}
+
+void PreviewPanel::updateFrame() {
+    core::TimelineTime curTime = engine_.playback().currentTime();
+    core::TimelineTime dur = engine_.project().totalDuration();
+    const auto& fps = engine_.project().settings().fps;
+
+    std::string curTc = core::Timecode::format(curTime, core::TimecodeFormat::HH_MM_SS_FF, fps);
+    std::string durTc = core::Timecode::format(dur, core::TimecodeFormat::HH_MM_SS_FF, fps);
+    if (timecodeLabel_) {
+        const auto& pal = Theme::instance().palette();
+        QString tcHtml = QString("<span style=\"color: %1;\">%2</span> <span style=\"color: %3;\">/ %4</span>")
+            .arg(pal.primaryAccent.name())
+            .arg(QString::fromStdString(curTc))
+            .arg(pal.textSecondary.name())
+            .arg(QString::fromStdString(durTc));
+        timecodeLabel_->setText(tcHtml);
+    }
+
+    // Decode frame if time changed
+    if (previewWidget_) {
+        previewWidget_->updateFrameIfNeeded();
+    }
+}
+
+void PreviewPanel::markFrameDirty() {
+    if (previewWidget_) {
+        previewWidget_->markFrameDirty();
+    }
 }
 
 void PreviewPanel::onPlayPauseClicked() {

@@ -1,0 +1,321 @@
+{
+    "checks": [
+        {
+            "name": "capture-tab-0",
+            "passed": true
+        },
+        {
+            "name": "capture-tab-1",
+            "passed": true
+        },
+        {
+            "name": "capture-tab-2",
+            "passed": true
+        },
+        {
+            "name": "capture-tab-3",
+            "passed": true
+        },
+        {
+            "name": "capture-tab-4",
+            "passed": true
+        },
+        {
+            "name": "capture-tab-5",
+            "passed": true
+        },
+        {
+            "name": "capture-tab-6",
+            "passed": true
+        },
+        {
+            "name": "capture-tab-7",
+            "passed": true
+        },
+        {
+            "name": "capture-tab-8",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab0",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab1",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab2",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab3",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab4",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab5",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab6",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab7",
+            "passed": true
+        },
+        {
+            "name": "responsive-1280x720-tab8",
+            "passed": true
+        },
+        {
+            "name": "capture-settings-1280x720",
+            "passed": true
+        },
+        {
+            "name": "settings-no-horizontal-clip-1280",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab0",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab1",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab2",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab3",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab4",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab5",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab6",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab7",
+            "passed": true
+        },
+        {
+            "name": "responsive-1366x768-tab8",
+            "passed": true
+        },
+        {
+            "name": "capture-settings-1366x768",
+            "passed": true
+        },
+        {
+            "name": "settings-no-horizontal-clip-1366",
+            "passed": true
+        },
+        {
+            "name": "countries-resource",
+            "passed": true
+        },
+        {
+            "name": "countries-parsed",
+            "passed": true
+        },
+        {
+            "name": "flag-resource",
+            "passed": true
+        },
+        {
+            "name": "custom-select-settingsFps",
+            "passed": true
+        },
+        {
+            "name": "popup-visible-settingsFps",
+            "passed": true
+        },
+        {
+            "name": "popup-image-settingsFps",
+            "passed": true
+        },
+        {
+            "name": "keyboard-select-settingsFps",
+            "passed": true
+        },
+        {
+            "name": "custom-canvas-present",
+            "passed": true
+        },
+        {
+            "name": "portrait-updates-project",
+            "passed": true
+        },
+        {
+            "name": "capture-settings-portrait",
+            "passed": true
+        },
+        {
+            "name": "capture-settings-background",
+            "passed": true
+        },
+        {
+            "name": "custom-select-captionLanguage",
+            "passed": true
+        },
+        {
+            "name": "popup-visible-captionLanguage",
+            "passed": true
+        },
+        {
+            "name": "popup-image-captionLanguage",
+            "passed": true
+        },
+        {
+            "name": "keyboard-select-captionLanguage",
+            "passed": true
+        },
+        {
+            "name": "no-fake-captions",
+            "passed": true
+        },
+        {
+            "name": "capture-captions-empty-status",
+            "passed": true
+        },
+        {
+            "name": "capture-text-tts",
+            "passed": true
+        },
+        {
+            "name": "custom-select-ttsVoice",
+            "passed": true
+        },
+        {
+            "name": "popup-visible-ttsVoice",
+            "passed": true
+        },
+        {
+            "name": "popup-image-ttsVoice",
+            "passed": true
+        },
+        {
+            "name": "keyboard-select-ttsVoice",
+            "passed": true
+        },
+        {
+            "name": "custom-select-previewZoomCombo",
+            "passed": true
+        },
+        {
+            "name": "popup-visible-previewZoomCombo",
+            "passed": true
+        },
+        {
+            "name": "popup-image-previewZoomCombo",
+            "passed": true
+        },
+        {
+            "name": "keyboard-select-previewZoomCombo",
+            "passed": true
+        },
+        {
+            "name": "export-centered",
+            "passed": true
+        },
+        {
+            "name": "export-resolution-data",
+            "passed": true
+        },
+        {
+            "name": "export-select-exportResolution",
+            "passed": true
+        },
+        {
+            "name": "export-select-exportFormat",
+            "passed": true
+        },
+        {
+            "name": "export-select-exportQuality",
+            "passed": true
+        },
+        {
+            "name": "export-select-exportAudio",
+            "passed": true
+        },
+        {
+            "name": "export-light-background",
+            "passed": true
+        },
+        {
+            "name": "ordinary-dialog-opaque",
+            "passed": true
+        },
+        {
+            "name": "export-centered",
+            "passed": true
+        },
+        {
+            "name": "export-resolution-data",
+            "passed": true
+        },
+        {
+            "name": "export-select-exportResolution",
+            "passed": true
+        },
+        {
+            "name": "export-select-exportFormat",
+            "passed": true
+        },
+        {
+            "name": "export-select-exportQuality",
+            "passed": true
+        },
+        {
+            "name": "export-select-exportAudio",
+            "passed": true
+        },
+        {
+            "name": "export-dark-background",
+            "passed": true
+        },
+        {
+            "name": "ordinary-dialog-opaque",
+            "passed": true
+        },
+        {
+            "name": "default-text-insert",
+            "passed": true
+        },
+        {
+            "name": "capture-text-inspector",
+            "passed": true
+        },
+        {
+            "name": "undo-text-insert",
+            "passed": true
+        },
+        {
+            "name": "insert-flag",
+            "passed": true
+        },
+        {
+            "name": "flag-has-media",
+            "passed": true
+        },
+        {
+            "name": "undo-flag-insert",
+            "passed": true
+        }
+    ],
+    "passed": true
+}

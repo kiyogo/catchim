@@ -1,5 +1,6 @@
 import type { PlacementTimeSpan } from "@/timeline/placement/types";
 import type { TimelineElement } from "@/timeline";
+import { initRustEngine, getRustEngineBindings } from "./rust-engine";
 
 const WASM_MODULE_URL = "/wasm/opencut_core.js";
 const NATIVE_TIMELINE_ENABLED =
@@ -114,6 +115,14 @@ export interface NativeTimelineBindings {
 	computeBufferPeak: (samplesPtr: number, numSamples: number) => number;
 	clampBufferSamples: (samplesPtr: number, numSamples: number, maxPeak: number) => void;
 	downmixStereo: (leftPtr: number, rightPtr: number, outPtr: number, numSamples: number) => void;
+	uiSceneCreate?: () => number;
+	uiSceneDestroy?: (scene: number) => void;
+	uiCreateNode?: (scene: number, nodeType: number, x: number, y: number, w: number, h: number) => number;
+	uiAddChild?: (scene: number, parentId: number, childId: number) => number;
+	uiComputeLayout?: (scene: number, rootW: number, rootH: number) => void;
+	uiHitTest?: (scene: number, px: number, py: number) => number;
+	uiSetHover?: (scene: number, px: number, py: number) => number;
+	timelineHitTestClip?: (px: number, py: number, clipX: number, clipY: number, clipW: number, clipH: number, handleW: number) => number;
 	malloc: (size: number) => number;
 	free: (ptr: number) => void;
 	UTF8ToString: (ptr: number, maxBytes?: number) => string;
@@ -337,23 +346,31 @@ function wrapNativeTimelineBindings(
 }
 
 export function warmNativeTimelineCore(): void {
-	if (!NATIVE_TIMELINE_ENABLED || !isBrowser() || nativeBindings) {
+	if (!NATIVE_TIMELINE_ENABLED || nativeBindings) {
 		return;
 	}
 
-	nativeLoadPromise ??= importEmscriptenFactory()
-		.then((factory) =>
-			factory({ locateFile: (path: string) => `/wasm/${path}` }),
-		)
-		.then((module) => {
-			nativeBindings = wrapNativeTimelineBindings(module);
-			return nativeBindings;
+	nativeLoadPromise ??= initRustEngine()
+		.then((bindings) => {
+			if (bindings) {
+				nativeBindings = bindings;
+				return bindings;
+			}
+			if (!isBrowser()) return null;
+			return importEmscriptenFactory()
+				.then((factory) =>
+					factory({ locateFile: (path: string) => `/wasm/${path}` }),
+				)
+				.then((module) => {
+					nativeBindings = wrapNativeTimelineBindings(module);
+					return nativeBindings;
+				});
 		})
 		.catch(() => null);
 }
 
 export function getNativeTimelineBindings(): NativeTimelineBindings | null {
-	return nativeBindings;
+	return nativeBindings ?? getRustEngineBindings();
 }
 
 function cacheMatchesElements({

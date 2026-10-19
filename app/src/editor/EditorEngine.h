@@ -55,7 +55,7 @@ public:
 
     // Timeline editing commands (Undoable)
     bool addClip(const core::TrackId& trackId, Clip clip);
-    bool insertElement(Clip clip, core::TimelineTime startTime, std::optional<core::TrackId> explicitTrackId = std::nullopt);
+    bool insertElement(Clip clip, core::TimelineTime startTime, std::optional<core::TrackId> explicitTrackId = std::nullopt, bool newTrack = false);
     bool moveClip(const core::ClipId& clipId, const core::TrackId& targetTrackId, core::TimelineTime targetTime);
     bool trimClipStart(const core::ClipId& clipId, core::TimelineTime newStartTime);
     bool trimClipEnd(const core::ClipId& clipId, core::TimelineTime newDuration);

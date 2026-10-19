@@ -188,6 +188,8 @@ bool Timeline::trimClipStart(const core::ClipId& clipId, core::TimelineTime newS
     core::TimelineTime newTrimStart = clip->trimStart() + delta;
 
     if (newTrimStart.ticks() < 0) return false;
+    if (clip->sourceDuration().has_value() &&
+        newTrimStart + newDuration > *clip->sourceDuration()) return false;
 
     if (!track->canPlace(newStartTime, newDuration, clipId)) return false;
 
@@ -206,6 +208,12 @@ bool Timeline::trimClipEnd(const core::ClipId& clipId, core::TimelineTime newDur
 
     Clip* clip = track->findClip(clipId);
     if (!clip) return false;
+
+    // Never allow a trim gesture to extend a media clip past its source.
+    if (clip->sourceDuration().has_value()) {
+        const auto available = (*clip->sourceDuration() - clip->trimStart()) / std::max(.01,clip->getParam<double>("speed",1));
+        if (available.ticks() <= 0 || newDuration > available) return false;
+    }
 
     if (!track->canPlace(clip->startTime(), newDuration, clipId)) return false;
 

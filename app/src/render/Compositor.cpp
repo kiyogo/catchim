@@ -20,6 +20,7 @@ Compositor::Compositor(int32_t width, int32_t height)
 }
 
 void Compositor::setCanvasSize(int32_t width, int32_t height) {
+    if(width==width_&&height==height_)return;
     width_ = width;
     height_ = height;
     output_.width = width_;

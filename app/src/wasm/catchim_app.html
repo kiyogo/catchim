@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#101114">
+  <title>Catchim</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body, #screen { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #101114; }
+    #screen { position: fixed; inset: 0; display: none; background: #f7f8fa; }
+    #catchim-loader {
+      position: fixed; inset: 0; display: grid; place-items: center;
+      background: radial-gradient(ellipse at 50% 44%, #20242b 0%, #14161a 46%, #101114 100%);
+      color: #f4f7fb; transition: opacity 220ms ease;
+    }
+    .loader-content { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+    .brand-mark {
+      width: 68px; height: 68px; display: grid; place-items: center; border-radius: 20px;
+      color: white; font-size: 39px; font-weight: 750; letter-spacing: -5px; padding: 0 5px 5px 0;
+      background: linear-gradient(145deg, #35c9f4, #1689ef 72%);
+      box-shadow: 0 12px 40px #1689ef42;
+    }
+    .brand-name { font-size: 21px; font-weight: 650; letter-spacing: .15px; }
+    .loader-track { width: 112px; height: 3px; border-radius: 3px; overflow: hidden; background: #343942; }
+    .loader-progress { width: 38%; height: 100%; border-radius: inherit; background: #38bdf8; animation: loading 1.15s ease-in-out infinite alternate; }
+    @keyframes loading { from { transform: translateX(0); } to { transform: translateX(165%); } }
+    #load-error { display: none; max-width: 340px; padding: 20px; text-align: center; color: #d9dee7; }
+    #load-error button { margin-top: 14px; padding: 9px 16px; border: 0; border-radius: 8px; background: #1689ef; color: white; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="catchim-loader" role="status" aria-label="Đang tải Catchim">
+    <div class="loader-content">
+      <div class="brand-mark" aria-hidden="true">c</div>
+      <div class="brand-name">Catchim</div>
+      <div class="loader-track" aria-hidden="true"><div class="loader-progress"></div></div>
+    </div>
+    <div id="load-error">Catchim chưa thể khởi động.<br><button onclick="location.reload()">Tải lại</button></div>
+  </div>
+  <div id="screen"></div>
+  <script>
+    async function init() {
+      const screen = document.getElementById('screen');
+      const loader = document.getElementById('catchim-loader');
+      const showError = () => {
+        loader.querySelector('.loader-content').style.display = 'none';
+        document.getElementById('load-error').style.display = 'block';
+      };
+      try {
+        await qtLoad({ qt: {
+          onLoaded: () => { screen.style.display = 'block'; loader.style.display = 'none'; },
+          onExit: (exitData) => { if (exitData && exitData.crashed) showError(); },
+          entryFunction: window.catchim_app_entry,
+          containerElements: [screen]
+        }});
+      } catch (error) {
+        console.error('Catchim startup failed:', error);
+        showError();
+      }
+    }
+    window.addEventListener('load', init, { once: true });
+  </script>
+  <script src="catchim_app.js"></script>
+  <script src="qtloader.js"></script>
+</body>
+</html>

@@ -8,25 +8,36 @@
 #include <QLineEdit>
 #include <QComboBox>
 #include <QLabel>
+#include <QHash>
+#include <QImage>
+#include <QSet>
+#include <QThreadPool>
 #include "editor/EditorEngine.h"
 #include "media/MediaLibrary.h"
 
 namespace catchim::ui {
 
+class SidebarTooltipWidget;
+
 class AssetsPanel : public QWidget {
     Q_OBJECT
 public:
     AssetsPanel(editor::EditorEngine& engine, media::MediaLibrary& mediaLibrary, QWidget* parent = nullptr);
+    ~AssetsPanel() override;
 
     void refresh();
+    void revealMedia(const core::MediaId& mediaId);
+    void showTabTooltip(int row);
 
     QSize sizeHint() const override { return QSize(340, 600); }
-    QSize minimumSizeHint() const override { return QSize(280, 400); }
+    QSize minimumSizeHint() const override { return QSize(220, 180); }
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
 
 private slots:
     void onImportClicked();
@@ -41,7 +52,6 @@ private slots:
     void onApplyAdjustment(double brightness, double contrast, double saturation, double temperature, double tint);
     void onAddAdjustmentLayer();
     void onImportSrtClicked();
-    void onAutoTranscribeClicked();
     void onCanvasAspectChanged(int width, int height);
     void onCanvasBgColorChanged(const QColor& color);
 
@@ -60,10 +70,27 @@ private:
     editor::EditorEngine& engine_;
     media::MediaLibrary& mediaLibrary_;
 
+    enum class MediaSortKey { Name, Type, Duration, Size };
+    enum class MediaSortOrder { Asc, Desc };
+
+    MediaSortKey mediaSortKey_{MediaSortKey::Name};
+    MediaSortOrder mediaSortOrder_{MediaSortOrder::Asc};
+    QPushButton* sortBtn_{nullptr};
+    QMenu* sortMenu_{nullptr};
+
+    void updateSortMenu();
+    void applySort();
+    void requestThumbnail(const std::shared_ptr<media::MediaAsset>& asset);
+    QHash<QString,QImage> mediaThumbnails_;
+    QSet<QString> pendingThumbnails_;
+    QThreadPool thumbnailPool_;
+
     QListWidget* tabList_{nullptr};
     QStackedWidget* viewsStack_{nullptr};
     QListWidget* mediaListWidget_{nullptr};
+    QWidget* mediaEmptyOverlay_{nullptr};
     QLineEdit* mediaSearchInput_{nullptr};
+    SidebarTooltipWidget* sidebarTooltip_{nullptr};
 };
 
 } // namespace catchim::ui

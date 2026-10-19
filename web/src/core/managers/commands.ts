@@ -3,6 +3,7 @@ import type { Command, CommandResult } from "@/commands";
 import type { EditorSelectionSnapshot } from "@/selection/editor-selection";
 import { applyRippleAdjustments, computeRippleAdjustments } from "@/ripple";
 import type { SceneTracks } from "@/timeline/types";
+import { prepareBrowserHistory, commitBrowserHistory, restoreBrowserHistory, isBrowserHistoryActive } from "@/native/browser-editor-core";
 
 interface CommandHistoryEntry {
 	command: Command;
@@ -19,6 +20,7 @@ export class CommandManager {
 	constructor(private editor: EditorCore) {}
 
 	execute({ command }: { command: Command }): Command {
+		prepareBrowserHistory(this.editor);
 		const beforeTracks = this.isRippleEnabled
 			? (this.editor.scenes.getActiveSceneOrNull()?.tracks ?? null)
 			: null;
@@ -33,6 +35,8 @@ export class CommandManager {
 			selectionOverride,
 		});
 		this.redoStack = [];
+		commitBrowserHistory(this.editor);
+		if (isBrowserHistoryActive() && this.history.length > 100) this.history.shift();
 		return command;
 	}
 
@@ -42,6 +46,8 @@ export class CommandManager {
 			previousSelection: this.getSelectionSnapshot(),
 		});
 		this.redoStack = [];
+		commitBrowserHistory(this.editor);
+		if (isBrowserHistoryActive() && this.history.length > 100) this.history.shift();
 	}
 
 	registerReactor(reactor: () => void): void {
@@ -64,6 +70,7 @@ export class CommandManager {
 				});
 			}
 			this.redoStack.push(entry);
+			restoreBrowserHistory(this.editor, "undo");
 		}
 	}
 
@@ -88,6 +95,7 @@ export class CommandManager {
 			previousSelection,
 			selectionOverride,
 		});
+		restoreBrowserHistory(this.editor, "redo");
 	}
 
 	canUndo(): boolean {

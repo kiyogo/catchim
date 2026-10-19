@@ -1,0 +1,119 @@
+{
+    "captures": [
+        {
+            "device_pixel_ratio": 2,
+            "font": "Inter",
+            "height": 938,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/dpi-2/editor-1912x938.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    470,
+                    436
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    302,
+                    135
+                ],
+                "previewPanel": [
+                    484,
+                    53,
+                    940,
+                    436
+                ],
+                "previewPlayBtn": [
+                    938,
+                    444,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    1244,
+                    446,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    1432,
+                    53,
+                    470,
+                    436
+                ],
+                "sceneSplitWidget": [
+                    914,
+                    504,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    497,
+                    1896,
+                    435
+                ]
+            },
+            "width": 1912
+        },
+        {
+            "device_pixel_ratio": 2,
+            "font": "Inter",
+            "height": 720,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/dpi-2/editor-1280x720.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    312,
+                    327
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    253,
+                    149
+                ],
+                "previewPanel": [
+                    326,
+                    53,
+                    624,
+                    327
+                ],
+                "previewPlayBtn": [
+                    622,
+                    335,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    770,
+                    337,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    958,
+                    53,
+                    312,
+                    327
+                ],
+                "sceneSplitWidget": [
+                    598,
+                    395,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    388,
+                    1264,
+                    326
+                ]
+            },
+            "width": 1280
+        }
+    ],
+    "passed": true
+}

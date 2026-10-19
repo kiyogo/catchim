@@ -17,56 +17,126 @@ TimelineRulerWidget::TimelineRulerWidget(editor::EditorEngine& engine, QWidget* 
 }
 
 core::TimelineTime TimelineRulerWidget::pixelToTime(int pixelX) const {
+    int contentX = pixelX - Metrics::trackLabelsWidth + scrollOffset_;
     double pixelsPerSecond = 50.0 * zoomFactor_;
-    double sec = static_cast<double>(pixelX + scrollOffset_) / pixelsPerSecond;
-    return core::TimelineTime::fromSeconds(std::max(0.0, sec));
+    double sec = static_cast<double>(contentX) / pixelsPerSecond;
+    const auto time = core::TimelineTime::fromSeconds(std::max(0.0, sec));
+    const auto duration = engine_.project().totalDuration();
+    return duration.ticks() > 0 ? std::min(time, duration) : time;
 }
 
 void TimelineRulerWidget::paintEvent(QPaintEvent* /* event */) {
     QPainter painter(this);
     const auto& palette = Theme::instance().palette();
-    painter.fillRect(rect(), palette.secondary);
+    painter.fillRect(rect(), palette.panelBackground);
 
     double pixelsPerSecond = 50.0 * zoomFactor_;
     int w = width();
 
-    // Draw bottom border
+    // Draw bottom border across whole ruler
     painter.setPen(palette.border);
     painter.drawLine(0, height() - 1, w, height() - 1);
 
+    // Left Track Labels Corner (Metrics::trackLabelsWidth)
+    QRect cornerRect(0, 0, Metrics::trackLabelsWidth, height() - 1);
+    painter.fillRect(cornerRect, palette.panelBackground);
+    painter.setPen(palette.border);
+    painter.drawLine(Metrics::trackLabelsWidth - 1, 0, Metrics::trackLabelsWidth - 1, height() - 1);
+
+    // Clip ruler content area to right of track labels
+    painter.save();
+    painter.setClipRect(Metrics::trackLabelsWidth, 0, w - Metrics::trackLabelsWidth, height());
+
     // Draw ruler tick marks
-    painter.setPen(palette.textSecondary);
-    painter.setFont(QFont("Inter", 8));
+    QFont rulerFont("Inter");
+    rulerFont.setPixelSize(10);
+    painter.setFont(rulerFont);
+
+    double fps = std::max(1.,engine_.project().settings().fps.toFps());
+    double pixelsPerFrame = pixelsPerSecond / fps;
+
+    // Minimum label spacing in pixels to prevent text collision (matching web MIN_LABEL_SPACING_PX = 120)
+    double minLabelSpacingPx = 120.0;
+    double labelIntervalSec = 1.0;
+
+    const int frameIntervals[] = { 2, 3, 5, 10, 15 };
+    bool foundFrame = false;
+    for (int fi : frameIntervals) {
+        if (pixelsPerFrame * fi >= minLabelSpacingPx) {
+            labelIntervalSec = static_cast<double>(fi) / fps;
+            foundFrame = true;
+            break;
+        }
+    }
+    if (!foundFrame) {
+        const int secMultipliers[] = { 1, 2, 3, 5, 10, 15, 30, 60, 120, 300, 600 };
+        for (int sm : secMultipliers) {
+            if (pixelsPerSecond * sm >= minLabelSpacingPx) {
+                labelIntervalSec = sm;
+                break;
+            }
+        }
+    }
+
+    // Tick interval matching web getRulerConfig
+    double rawTickIntervalSec = labelIntervalSec;
+    const int tickFrameIntervals[] = { 1, 2, 3, 5, 10, 15 };
+    for (int fi : tickFrameIntervals) {
+        if (pixelsPerFrame * fi >= 18.0) {
+            rawTickIntervalSec = static_cast<double>(fi) / fps;
+            break;
+        }
+    }
+    int labelFrames = static_cast<int>(std::round(labelIntervalSec * fps));
+    int tickFrames = static_cast<int>(std::round(rawTickIntervalSec * fps));
+    double tickIntervalSec = rawTickIntervalSec;
+    if (tickFrames > 0 && labelFrames % tickFrames != 0) {
+        for (int fi : tickFrameIntervals) {
+            if (labelFrames % fi == 0 && pixelsPerFrame * fi >= 18.0) {
+                tickIntervalSec = static_cast<double>(fi) / fps;
+                break;
+            }
+        }
+    }
 
     double startSec = std::max(0.0, static_cast<double>(scrollOffset_) / pixelsPerSecond);
-    double endSec = static_cast<double>(scrollOffset_ + w) / pixelsPerSecond;
+    double endSec = static_cast<double>(scrollOffset_ + w - Metrics::trackLabelsWidth) / pixelsPerSecond;
 
-    // Step size depends on zoom
-    double stepSec = 1.0;
-    if (pixelsPerSecond < 20.0) stepSec = 5.0;
-    else if (pixelsPerSecond > 200.0) stepSec = 0.5;
+    int startTick = static_cast<int>(std::floor(startSec / tickIntervalSec));
+    int endTick = static_cast<int>(std::ceil(endSec / tickIntervalSec));
 
-    int firstTick = static_cast<int>(std::floor(startSec / stepSec));
-    int lastTick = static_cast<int>(std::ceil(endSec / stepSec));
+    for (int t = startTick; t <= endTick; ++t) {
+        double sec = t * tickIntervalSec;
+        int x = Metrics::trackLabelsWidth + static_cast<int>(sec * pixelsPerSecond) - scrollOffset_;
+        if (x < Metrics::trackLabelsWidth || x >= w) continue;
 
-    for (int i = firstTick; i <= lastTick; ++i) {
-        double sec = i * stepSec;
-        int x = static_cast<int>(sec * pixelsPerSecond) - scrollOffset_;
-        if (x < 0 || x >= w) continue;
+        double mod = std::fmod(sec + 0.0001, labelIntervalSec);
+        bool isLabel = (mod < 0.001 || mod > labelIntervalSec - 0.001);
 
-        // Major tick
-        painter.setPen(palette.textSecondary);
-        painter.drawLine(x, 10, x, Metrics::timelineRulerHeight);
+        if (isLabel) {
+            // Format label text matching web formatRulerLabel
+            QString text;
+            double remSec = std::fmod(sec + 0.0001, 1.0);
+            bool isSecondBoundary = (remSec < 0.001 || remSec > 0.999);
+            if (isSecondBoundary) {
+                int totalSec = static_cast<int>(std::round(sec));
+                int mm = totalSec / 60;
+                int ss = totalSec % 60;
+                text = (totalSec == 0) ? "0:00" : QString("%1:%2").arg(mm, 2, 10, QChar('0')).arg(ss, 2, 10, QChar('0'));
+            } else {
+                int frameInSec = static_cast<int>(std::round(remSec * fps));
+                text = QString("%1f").arg(frameInSec);
+            }
 
-        // Time label (e.g. 0s, 1s, 2s, or 00:01)
-        int minutes = static_cast<int>(sec) / 60;
-        int seconds = static_cast<int>(sec) % 60;
-        QString text = (minutes > 0)
-            ? QString("%1:%2").arg(minutes).arg(seconds, 2, 10, QChar('0'))
-            : QString("%1s").arg(seconds);
-
-        painter.setPen(palette.textPrimary);
-        painter.drawText(x + 3, 16, text);
+            // Web: text-muted-foreground/85 absolute top-1 select-none text-[10px] leading-none
+            painter.setPen(QColor(113, 113, 122, 217));
+            int textX = (t == 0) ? (x + 4) : x;
+            painter.drawText(textX, 4, 80, 14, Qt::AlignLeft | Qt::AlignTop, text);
+        } else {
+            // Web: border-muted-foreground/25 absolute top-1.5 h-1.5 border-l
+            painter.setPen(QPen(QColor(113, 113, 122, 64), 1.0));
+            painter.drawLine(x, 6, x, 12);
+        }
     }
 
     // Draw Bookmarks Row (height 16px at bottom)
@@ -75,8 +145,8 @@ void TimelineRulerWidget::paintEvent(QPaintEvent* /* event */) {
         int bmY = Metrics::timelineRulerHeight + 2;
         for (const auto& bm : tl->bookmarks()) {
             double sec = bm.time.toSeconds();
-            int x = static_cast<int>(sec * pixelsPerSecond) - scrollOffset_;
-            if (x >= -8 && x < w + 8) {
+            int x = Metrics::trackLabelsWidth + static_cast<int>(sec * pixelsPerSecond) - scrollOffset_;
+            if (x >= Metrics::trackLabelsWidth - 4 && x < w + 4) {
                 // Draw small diamond bookmark marker
                 painter.setBrush(palette.primaryAccent);
                 painter.setPen(Qt::NoPen);
@@ -90,36 +160,45 @@ void TimelineRulerWidget::paintEvent(QPaintEvent* /* event */) {
         }
     }
 
-    // Draw Playhead cursor handle on ruler
+    // Tick marks and bookmarks stay inside the time lane. The playhead head
+    // overlaps its boundary by 6px, so draw it after restoring the clip.
+    painter.restore();
+
     core::TimelineTime cur = engine_.playback().currentTime();
-    int playheadX = static_cast<int>(cur.toSeconds() * pixelsPerSecond) - scrollOffset_;
-    if (playheadX >= -5 && playheadX < w + 5) {
+    int playheadX = Metrics::trackLabelsWidth + static_cast<int>(cur.toSeconds() * pixelsPerSecond) - scrollOffset_;
+    if (playheadX >= Metrics::trackLabelsWidth && playheadX < w) {
+        // Match the 1px line in TimelineTracksWidget, including at time zero.
+        painter.setPen(QPen(palette.primaryAccent, 1.0));
+        painter.drawLine(playheadX, 4, playheadX, height());
+
+        // The full head remains visible over the track-label corner at t=0.
         painter.setBrush(palette.primaryAccent);
-        painter.setPen(Qt::NoPen);
-        QPolygon head;
-        head << QPoint(playheadX - 5, 0)
-             << QPoint(playheadX + 5, 0)
-             << QPoint(playheadX + 5, Metrics::timelineRulerHeight - 4)
-             << QPoint(playheadX, Metrics::timelineRulerHeight + 2)
-             << QPoint(playheadX - 5, Metrics::timelineRulerHeight - 4);
-        painter.drawPolygon(head);
+        painter.setPen(QPen(palette.primaryAccent, 1.0));
+        painter.drawEllipse(playheadX - 6, 4, 12, 12);
     }
+
 }
 
 void TimelineRulerWidget::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
-        isDragging_ = true;
-        core::TimelineTime time = pixelToTime(event->pos().x());
-        emit seekRequested(time);
-        event->accept();
-        return;
+        const auto current=engine_.playback().currentTime();
+        const int headX=Metrics::trackLabelsWidth+static_cast<int>(current.toSeconds()*50.0*zoomFactor_)-scrollOffset_;
+        const bool onHead=headX>=Metrics::trackLabelsWidth&&QRect(headX-6,4,13,13).contains(event->pos());
+        if (onHead || event->pos().x() >= Metrics::trackLabelsWidth) {
+            isDragging_ = true;
+            dragOffsetX_=onHead?event->pos().x()-headX:0;
+            emit seekRequested(onHead?current:pixelToTime(event->pos().x()));
+            event->accept();
+            return;
+        }
     }
     QWidget::mousePressEvent(event);
 }
 
 void TimelineRulerWidget::mouseMoveEvent(QMouseEvent* event) {
     if (isDragging_) {
-        core::TimelineTime time = pixelToTime(event->pos().x());
+        int clampedX = std::max(Metrics::trackLabelsWidth, event->pos().x()-dragOffsetX_);
+        core::TimelineTime time = pixelToTime(clampedX);
         emit seekRequested(time);
         event->accept();
         return;

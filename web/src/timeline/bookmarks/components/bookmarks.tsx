@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { EditorCore } from "@/core";
 import { useEditor } from "@/editor/use-editor";
 import type { BookmarkDragState } from "../hooks/use-bookmark-drag";
@@ -82,12 +82,92 @@ export function TimelineBookmarksRow({
 }: TimelineBookmarksRowProps) {
 	const { t } = useTranslation();
 	const bookmarks = useEditor((e) => e.scenes.getActiveScene().bookmarks);
+	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+
+		const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+		const width = dynamicTimelineWidth;
+		const height = TIMELINE_BOOKMARK_ROW_HEIGHT_PX;
+
+		if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+			canvas.width = Math.round(width * dpr);
+			canvas.height = Math.round(height * dpr);
+		}
+
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		ctx.save();
+		ctx.scale(dpr, dpr);
+		ctx.clearRect(0, 0, width, height);
+
+		for (const bookmark of bookmarks) {
+			const isDragging =
+				dragState.isDragging &&
+				dragState.bookmarkTime !== null &&
+				dragState.bookmarkTime === bookmark.time;
+			const displayTime = isDragging ? dragState.currentTime : bookmark.time;
+			const bookmarkDuration = bookmark.duration ?? ZERO_MEDIA_TIME;
+			const durationWidth =
+				bookmarkDuration > 0
+					? timelineTimeToPixels({ time: bookmarkDuration, zoomLevel })
+					: 0;
+			const left = timelineTimeToSnappedPixels({ time: displayTime, zoomLevel });
+			const iconColor = bookmark.color ?? DEFAULT_TIMELINE_BOOKMARK_COLOR;
+
+			if (durationWidth > MIN_BOOKMARK_WIDTH_PX) {
+				ctx.save();
+				ctx.fillStyle = iconColor;
+				ctx.globalAlpha = 0.3;
+				ctx.fillRect(left, 1.5, durationWidth, BOOKMARK_MARKER_HEIGHT_PX - 2.5);
+				ctx.restore();
+			}
+
+			const bx = left - BOOKMARK_HALF_WIDTH_PX;
+			const bw = BOOKMARK_MARKER_WIDTH_PX;
+			const bh = BOOKMARK_MARKER_HEIGHT_PX;
+
+			ctx.save();
+			ctx.fillStyle = iconColor;
+			ctx.beginPath();
+			ctx.moveTo(bx + bw * 0.5, bh);
+			ctx.lineTo(bx + bw * 0.12, bh * 0.72);
+			ctx.lineTo(bx + bw * 0.12, bh * 0.1);
+			ctx.lineTo(bx + bw * 0.88, bh * 0.1);
+			ctx.lineTo(bx + bw * 0.88, bh * 0.72);
+			ctx.closePath();
+			ctx.fill();
+
+			ctx.fillStyle = "#ffffff";
+			ctx.beginPath();
+			ctx.arc(bx + bw * 0.5, bh * 0.42, 1.5, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.restore();
+		}
+
+		ctx.restore();
+	}, [bookmarks, dragState, dynamicTimelineWidth, zoomLevel]);
 
 	return (
 		<div
 			className="relative flex-1 overflow-hidden"
 			style={{ height: TIMELINE_BOOKMARK_ROW_HEIGHT_PX }}
 		>
+			<canvas
+				ref={canvasRef}
+				data-engine="canvas-bookmarks"
+				style={{
+					position: "absolute",
+					top: 0,
+					left: 0,
+					width: `${dynamicTimelineWidth}px`,
+					height: `${TIMELINE_BOOKMARK_ROW_HEIGHT_PX}px`,
+					pointerEvents: "none",
+				}}
+			/>
 			<button
 				className="relative w-full cursor-default select-none border-0 bg-transparent p-0"
 				style={{

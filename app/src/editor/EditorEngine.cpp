@@ -14,6 +14,7 @@ EditorEngine::EditorEngine()
     playback_.setDuration(project_.totalDuration());
 
     history_.setOnChangedCallback([this]() {
+        if(history_.size()>0)project_.setDirty(true);
         notifyTimelineChanged();
     });
 }
@@ -85,7 +86,7 @@ bool EditorEngine::isClipSelected(const core::ClipId& clipId) const {
     return std::find(selectedClipIds_.begin(), selectedClipIds_.end(), clipId) != selectedClipIds_.end();
 }
 
-bool EditorEngine::insertElement(Clip clip, core::TimelineTime startTime, std::optional<core::TrackId> explicitTrackId) {
+bool EditorEngine::insertElement(Clip clip, core::TimelineTime startTime, std::optional<core::TrackId> explicitTrackId, bool newTrack) {
     Timeline* tl = activeTimeline();
     if (!tl) return false;
 
@@ -101,6 +102,7 @@ bool EditorEngine::insertElement(Clip clip, core::TimelineTime startTime, std::o
     }
 
     InsertElementPlacement placement;
+    placement.autoTrackType=autoTrack;
     if (explicitTrackId.has_value() && !explicitTrackId->isEmpty()) {
         placement.mode = InsertElementPlacement::Mode::Explicit;
         placement.explicitTrackId = *explicitTrackId;
@@ -109,6 +111,7 @@ bool EditorEngine::insertElement(Clip clip, core::TimelineTime startTime, std::o
         placement.autoTrackType = autoTrack;
     }
     placement.startTime = startTime;
+    if(newTrack)placement.mode=InsertElementPlacement::Mode::NewTrack;
 
     core::ClipId cid = clip.id();
     auto cmd = std::make_unique<InsertElementCommand>(*tl, std::move(clip), placement, &project_);

@@ -59,6 +59,21 @@ export function getTextMeasurementContext():
 		}
 	}
 
+	if (typeof OffscreenCanvas === "undefined" && typeof document === "undefined") {
+		const dummyCtx = {
+			measureText: (text: string) => ({
+				width: text.length * 10,
+				actualBoundingBoxAscent: 10,
+				actualBoundingBoxDescent: 2,
+			}),
+			font: "",
+			save: () => {},
+			restore: () => {},
+		} as unknown as CanvasRenderingContext2D;
+		textMeasurementContext = dummyCtx;
+		return dummyCtx;
+	}
+
 	throw new Error("Failed to create text measurement context");
 }
 

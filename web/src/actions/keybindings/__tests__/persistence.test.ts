@@ -20,7 +20,7 @@ describe("keybinding persistence", () => {
 	beforeEach(() => {
 		originalWarn = console.warn;
 		warnSpy = mock(() => {});
-		console.warn = warnSpy;
+		console.warn = warnSpy as any;
 	});
 
 	afterEach(() => {

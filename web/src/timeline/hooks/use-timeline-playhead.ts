@@ -70,7 +70,7 @@ export function useTimelinePlayhead({
 
 	// Playback events → update playhead position and auto-scroll during playback.
 	useEffect(() => {
-		const handler = (time: MediaTime) => ctrl.handlePlaybackUpdate(time);
+		const handler = () => ctrl.handlePlaybackUpdate(editor.playback.getDisplayTime());
 		ctrl.updatePlayheadLeft(editor.playback.getCurrentTime());
 		const unsubscribeUpdate = editor.playback.onUpdate(handler);
 		const unsubscribeSeek = editor.playback.onSeek(handler);

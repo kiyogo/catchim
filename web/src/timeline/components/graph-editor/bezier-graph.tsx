@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type PointerEvent } from "react";
+import { useRef, useState, useEffect, type PointerEvent } from "react";
 import { useShiftKey } from "@/hooks/use-shift-key";
 import { useCommittedRef } from "@/hooks/use-committed-ref";
 import { getBezierPoint } from "@/animation/bezier";
@@ -10,8 +10,8 @@ import { cn } from "@/utils/ui";
 const GRAPH_WIDTH = 140;
 const GRAPH_HEIGHT = 94;
 const GRAPH_PADDING = 12;
-const SVG_WIDTH = GRAPH_WIDTH + GRAPH_PADDING * 2;
-const SVG_HEIGHT = GRAPH_HEIGHT + GRAPH_PADDING * 2;
+const CANVAS_WIDTH = GRAPH_WIDTH + GRAPH_PADDING * 2;
+const CANVAS_HEIGHT = GRAPH_HEIGHT + GRAPH_PADDING * 2;
 const HANDLE_RADIUS = 3.5;
 const ENDPOINT_RADIUS = 2;
 const SNAP_THRESHOLD = 0.06;
@@ -22,7 +22,7 @@ const Y_CLAMP_MAX = 1.5;
 
 type BezierHandle = "c1" | "c2";
 
-export const BEZIER_GRAPH_MIN_HEIGHT = SVG_HEIGHT;
+export const BEZIER_GRAPH_MIN_HEIGHT = CANVAS_HEIGHT;
 
 function snap({
 	value,
@@ -40,38 +40,27 @@ function snap({
 	return value;
 }
 
-function toSvgX({ value }: { value: number }) {
+function toCanvasX({ value }: { value: number }) {
 	return GRAPH_PADDING + value * GRAPH_WIDTH;
 }
 
-function toSvgY({ value }: { value: number }) {
+function toCanvasY({ value }: { value: number }) {
 	return GRAPH_PADDING + (1 - value) * GRAPH_HEIGHT;
 }
 
-function fromSvgX({ svgX }: { svgX: number }) {
-	return Math.max(0, Math.min(1, (svgX - GRAPH_PADDING) / GRAPH_WIDTH));
+function fromCanvasX({ canvasX }: { canvasX: number }) {
+	return Math.max(0, Math.min(1, (canvasX - GRAPH_PADDING) / GRAPH_WIDTH));
 }
 
-function fromSvgY({ svgY }: { svgY: number }) {
+function fromCanvasY({ canvasY }: { canvasY: number }) {
 	return Math.max(
 		Y_CLAMP_MIN,
-		Math.min(Y_CLAMP_MAX, 1 - (svgY - GRAPH_PADDING) / GRAPH_HEIGHT),
+		Math.min(Y_CLAMP_MAX, 1 - (canvasY - GRAPH_PADDING) / GRAPH_HEIGHT),
 	);
 }
 
-function curvePath({ curve }: { curve: NormalizedCubicBezier }) {
-	const points: string[] = [];
-	for (let i = 0; i <= CURVE_SEGMENTS; i++) {
-		const progress = i / CURVE_SEGMENTS;
-		const x = toSvgX({ value: getBezierPoint({ progress, p0: 0, p1: curve[0], p2: curve[2], p3: 1 }) });
-		const y = toSvgY({ value: getBezierPoint({ progress, p0: 0, p1: curve[1], p2: curve[3], p3: 1 }) });
-		points.push(`${x},${y}`);
-	}
-	return `M${points.join("L")}`;
-}
-
-function clampHandleY({ svgY }: { svgY: number }) {
-	return Math.max(HANDLE_RADIUS, Math.min(SVG_HEIGHT - HANDLE_RADIUS, svgY));
+function clampHandleY({ canvasY }: { canvasY: number }) {
+	return Math.max(HANDLE_RADIUS, Math.min(CANVAS_HEIGHT - HANDLE_RADIUS, canvasY));
 }
 
 export function BezierGraph({
@@ -85,8 +74,9 @@ export function BezierGraph({
 	onChangeEnd?: (value: NormalizedCubicBezier) => void;
 	onCancel?: () => void;
 }) {
-	const svgRef = useRef<SVGSVGElement>(null);
+	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const [activeHandle, setActiveHandle] = useState<BezierHandle | null>(null);
+	const [hoverHandle, setHoverHandle] = useState<BezierHandle | null>(null);
 	const isShiftPressedRef = useShiftKey();
 	const latestValueRef = useCommittedRef(value);
 
@@ -95,31 +85,160 @@ export function BezierGraph({
 	}: {
 		event: PointerEvent;
 	}): { x: number; y: number } {
-		const svg = svgRef.current;
-		if (!svg) return { x: 0, y: 0 };
-		const rect = svg.getBoundingClientRect();
-		const scale = SVG_WIDTH / rect.width;
+		const canvas = canvasRef.current;
+		if (!canvas) return { x: 0, y: 0 };
+		const rect = canvas.getBoundingClientRect();
+		const scale = CANVAS_WIDTH / rect.width;
 		return {
 			x: (event.clientX - rect.left) * scale,
-			y: (event.clientY - rect.top) * (SVG_HEIGHT / rect.height),
+			y: (event.clientY - rect.top) * (CANVAS_HEIGHT / rect.height),
 		};
 	}
 
-	function onHandlePointerDown({ handle }: { handle: BezierHandle }) {
-		return (event: PointerEvent<SVGCircleElement>) => {
+	const c1 = { x: toCanvasX({ value: value[0] }), y: toCanvasY({ value: value[1] }) };
+	const c2 = { x: toCanvasX({ value: value[2] }), y: toCanvasY({ value: value[3] }) };
+	const c1Clamped = { x: c1.x, y: clampHandleY({ canvasY: c1.y }) };
+	const c2Clamped = { x: c2.x, y: clampHandleY({ canvasY: c2.y }) };
+	const p0 = { x: toCanvasX({ value: 0 }), y: toCanvasY({ value: 0 }) };
+	const p1 = { x: toCanvasX({ value: 1 }), y: toCanvasY({ value: 1 }) };
+
+	// Render canvas
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+
+		const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+		if (canvas.width !== Math.round(CANVAS_WIDTH * dpr) || canvas.height !== Math.round(CANVAS_HEIGHT * dpr)) {
+			canvas.width = Math.round(CANVAS_WIDTH * dpr);
+			canvas.height = Math.round(CANVAS_HEIGHT * dpr);
+		}
+
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		ctx.save();
+		ctx.scale(dpr, dpr);
+		ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+		// Background subtle fill
+		ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
+		ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+		// Diagonal guide line (p0 to p1)
+		ctx.save();
+		ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+		ctx.lineWidth = 1;
+		ctx.setLineDash([3, 3]);
+		ctx.beginPath();
+		ctx.moveTo(p0.x, p0.y);
+		ctx.lineTo(p1.x, p1.y);
+		ctx.stroke();
+		ctx.restore();
+
+		// Handle lines
+		ctx.save();
+		ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
+		ctx.lineWidth = 1;
+		ctx.beginPath();
+		ctx.moveTo(p0.x, p0.y);
+		ctx.lineTo(c1Clamped.x, c1Clamped.y);
+		ctx.moveTo(p1.x, p1.y);
+		ctx.lineTo(c2Clamped.x, c2Clamped.y);
+		ctx.stroke();
+		ctx.restore();
+
+		// Cubic Bezier curve
+		ctx.save();
+		ctx.strokeStyle = "#0ea5e9";
+		ctx.lineWidth = 2;
+		ctx.lineCap = "round";
+		ctx.beginPath();
+		for (let i = 0; i <= CURVE_SEGMENTS; i++) {
+			const progress = i / CURVE_SEGMENTS;
+			const x = toCanvasX({ value: getBezierPoint({ progress, p0: 0, p1: value[0], p2: value[2], p3: 1 }) });
+			const y = toCanvasY({ value: getBezierPoint({ progress, p0: 0, p1: value[1], p2: value[3], p3: 1 }) });
+			if (i === 0) {
+				ctx.moveTo(x, y);
+			} else {
+				ctx.lineTo(x, y);
+			}
+		}
+		ctx.stroke();
+		ctx.restore();
+
+		// Endpoints p0 and p1
+		ctx.save();
+		ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+		ctx.beginPath();
+		ctx.arc(p0.x, p0.y, ENDPOINT_RADIUS, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.beginPath();
+		ctx.arc(p1.x, p1.y, ENDPOINT_RADIUS, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.restore();
+
+		// Handle circles c1 and c2
+		const drawHandle = (pt: { x: number; y: number }, isActive: boolean, isHover: boolean) => {
+			ctx.save();
+			ctx.fillStyle = isActive || isHover ? "#38bdf8" : "#0ea5e9";
+			ctx.shadowColor = "rgba(14, 165, 233, 0.5)";
+			ctx.shadowBlur = isActive || isHover ? 6 : 2;
+			ctx.beginPath();
+			ctx.arc(pt.x, pt.y, HANDLE_RADIUS, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.strokeStyle = "#ffffff";
+			ctx.lineWidth = 1;
+			ctx.stroke();
+			ctx.restore();
+		};
+
+		drawHandle(c1Clamped, activeHandle === "c1", hoverHandle === "c1");
+		drawHandle(c2Clamped, activeHandle === "c2", hoverHandle === "c2");
+
+		ctx.restore();
+	}, [value, c1Clamped, c2Clamped, p0, p1, activeHandle, hoverHandle]);
+
+	function onPointerDown(event: PointerEvent<HTMLCanvasElement>) {
+		const pos = getPointerPosition({ event });
+		const d1 = Math.hypot(pos.x - c1Clamped.x, pos.y - c1Clamped.y);
+		const d2 = Math.hypot(pos.x - c2Clamped.x, pos.y - c2Clamped.y);
+		const hitTarget = 12;
+
+		let selected: BezierHandle | null = null;
+		if (d1 < hitTarget && d1 <= d2) {
+			selected = "c1";
+		} else if (d2 < hitTarget) {
+			selected = "c2";
+		}
+
+		if (selected) {
 			event.preventDefault();
 			event.stopPropagation();
-			setActiveHandle(handle);
+			setActiveHandle(selected);
 			event.currentTarget.setPointerCapture(event.pointerId);
-		};
+		}
 	}
 
-	function onPointerMove({ event }: { event: PointerEvent<SVGSVGElement> }) {
-		if (!activeHandle) return;
+	function onPointerMove(event: PointerEvent<HTMLCanvasElement>) {
 		const pointerPos = getPointerPosition({ event });
-		const x = fromSvgX({ svgX: pointerPos.x });
+
+		if (!activeHandle) {
+			const d1 = Math.hypot(pointerPos.x - c1Clamped.x, pointerPos.y - c1Clamped.y);
+			const d2 = Math.hypot(pointerPos.x - c2Clamped.x, pointerPos.y - c2Clamped.y);
+			const hitTarget = 12;
+			if (d1 < hitTarget && d1 <= d2) {
+				setHoverHandle("c1");
+			} else if (d2 < hitTarget) {
+				setHoverHandle("c2");
+			} else {
+				setHoverHandle(null);
+			}
+			return;
+		}
+
+		const x = fromCanvasX({ canvasX: pointerPos.x });
 		const y = snap({
-			value: fromSvgY({ svgY: pointerPos.y }),
+			value: fromCanvasY({ canvasY: pointerPos.y }),
 			targets: SNAP_TARGETS,
 			isEnabled: !isShiftPressedRef.current,
 		});
@@ -147,88 +266,26 @@ export function BezierGraph({
 		onCancel?.();
 	}
 
-	const path = curvePath({ curve: value });
-	const c1 = { x: toSvgX({ value: value[0] }), y: toSvgY({ value: value[1] }) };
-	const c2 = { x: toSvgX({ value: value[2] }), y: toSvgY({ value: value[3] }) };
-	const c1Clamped = { x: c1.x, y: clampHandleY({ svgY: c1.y }) };
-	const c2Clamped = { x: c2.x, y: clampHandleY({ svgY: c2.y }) };
-	const p0 = { x: toSvgX({ value: 0 }), y: toSvgY({ value: 0 }) };
-	const p1 = { x: toSvgX({ value: 1 }), y: toSvgY({ value: 1 }) };
-
 	return (
-		<svg
-			ref={svgRef}
-			viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
-			className="bg-foreground/3 w-full cursor-crosshair select-none"
-			onPointerMove={(event) => onPointerMove({ event })}
+		<canvas
+			ref={canvasRef}
+			data-engine="canvas-bezier-graph"
+			style={{
+				width: `${CANVAS_WIDTH}px`,
+				height: `${CANVAS_HEIGHT}px`,
+			}}
+			className={cn(
+				"w-full select-none rounded",
+				activeHandle
+					? "cursor-grabbing"
+					: hoverHandle
+						? "cursor-grab"
+						: "cursor-crosshair",
+			)}
+			onPointerDown={onPointerDown}
+			onPointerMove={onPointerMove}
 			onPointerUp={onPointerUp}
 			onPointerCancel={onPointerCancel}
-		>
-			<title>Bezier curve editor</title>
-			<line
-				x1={p0.x}
-				y1={p0.y}
-				x2={p1.x}
-				y2={p1.y}
-				className="stroke-foreground/8"
-				strokeWidth={1}
-				strokeDasharray="3 3"
-			/>
-			<line
-				x1={p0.x}
-				y1={p0.y}
-				x2={c1Clamped.x}
-				y2={c1Clamped.y}
-				className="stroke-primary/30"
-				strokeWidth={1}
-			/>
-			<line
-				x1={p1.x}
-				y1={p1.y}
-				x2={c2Clamped.x}
-				y2={c2Clamped.y}
-				className="stroke-primary/30"
-				strokeWidth={1}
-			/>
-			<path
-				d={path}
-				fill="none"
-				className="stroke-primary"
-				strokeWidth={2}
-				strokeLinecap="round"
-			/>
-			<circle
-				cx={p0.x}
-				cy={p0.y}
-				r={ENDPOINT_RADIUS}
-				className="fill-foreground/20"
-			/>
-			<circle
-				cx={p1.x}
-				cy={p1.y}
-				r={ENDPOINT_RADIUS}
-				className="fill-foreground/20"
-			/>
-			<circle
-				cx={c1Clamped.x}
-				cy={c1Clamped.y}
-				r={HANDLE_RADIUS}
-				className={cn(
-					"fill-primary cursor-grab",
-					activeHandle === "c1" && "cursor-grabbing",
-				)}
-				onPointerDown={onHandlePointerDown({ handle: "c1" })}
-			/>
-			<circle
-				cx={c2Clamped.x}
-				cy={c2Clamped.y}
-				r={HANDLE_RADIUS}
-				className={cn(
-					"fill-primary cursor-grab",
-					activeHandle === "c2" && "cursor-grabbing",
-				)}
-				onPointerDown={onHandlePointerDown({ handle: "c2" })}
-			/>
-		</svg>
+		/>
 	);
 }

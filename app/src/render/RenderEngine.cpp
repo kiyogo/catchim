@@ -133,6 +133,7 @@ const CompositorOutput& RenderEngine::renderFrame(
     int32_t zIndex = 0;
 
     auto renderClipLayer = [&](const editor::Clip& clip) {
+        if(clip.isHidden())return;
         if (time < clip.startTime() || time >= clip.endTime()) return;
 
         RenderLayer layer;
@@ -144,6 +145,9 @@ const CompositorOutput& RenderEngine::renderFrame(
         // Extract Transform
         layer.transform.positionX = clip.getParam<double>("transform.positionX", 0.0);
         layer.transform.positionY = clip.getParam<double>("transform.positionY", 0.0);
+        const double outputScaleX=static_cast<double>(compositor_.width())/std::max(1,project.settings().canvasSize.width);
+        const double outputScaleY=static_cast<double>(compositor_.height())/std::max(1,project.settings().canvasSize.height);
+        layer.transform.positionX*=outputScaleX;layer.transform.positionY*=outputScaleY;
         layer.transform.scaleX = clip.getParam<double>("transform.scaleX", 1.0);
         layer.transform.scaleY = clip.getParam<double>("transform.scaleY", 1.0);
         layer.transform.rotate = clip.getParam<double>("transform.rotate", 0.0);
@@ -161,6 +165,8 @@ const CompositorOutput& RenderEngine::renderFrame(
                 layer.transform.blendMode = clip.getParam<std::string>("transform.blendMode", "normal");
             }
         }
+        if (clip.hasParam("transform.blendModeName"))
+            layer.transform.blendMode = clip.getParam<std::string>("transform.blendModeName", "normal");
 
         bool decoded = false;
 
@@ -181,15 +187,28 @@ const CompositorOutput& RenderEngine::renderFrame(
                 }
 
                 int fw = 0, fh = 0;
+                int originalW=0,originalH=0;
                 std::vector<uint8_t> framePixels;
 
-                if (media::NativeVideoDecoder::instance().getFrame(asset->filePath(), clipElapsed, fw, fh, framePixels, clip.id().str())) {
+                auto& decoder=decoder_?*decoder_:media::NativeVideoDecoder::instance();
+                const bool previewPlaying = decoder.playbackMode();
+                decoder.setPlaybackMode(previewPlaying && !reversed && std::abs(speed - 1.) < .001);
+                const bool hasFrame = decoder.getFrame(asset->filePath(), clipElapsed, fw, fh, framePixels, clip.id().str(),&originalW,&originalH);
+                decoder.setPlaybackMode(previewPlaying);
+                if (hasFrame) {
                     layer.sourceWidth = fw;
                     layer.sourceHeight = fh;
                     layer.rgbaPixels = std::move(framePixels);
+                    layer.transform.scaleX*=static_cast<double>(originalW)/fw;
+                    layer.transform.scaleY*=static_cast<double>(originalH)/fh;
                     decoded = true;
                 }
             }
+        }
+
+        if(decoded&&(clip.type()==editor::ClipType::Video||clip.type()==editor::ClipType::Image||clip.type()==editor::ClipType::Sticker)) {
+            // Media coordinates live in project pixels, not export pixels.
+            layer.transform.scaleX*=outputScaleX;layer.transform.scaleY*=outputScaleY;
         }
 
         if (clip.type() == editor::ClipType::Text) {
@@ -208,9 +227,18 @@ const CompositorOutput& RenderEngine::renderFrame(
                 painter.setRenderHint(QPainter::TextAntialiasing);
 
                 QFont font("Segoe UI", static_cast<int>(fontSize));
+                if(clip.getParam<bool>("text.webLayout",false)) {
+                    font.setFamily(QString::fromStdString(clip.getParam<std::string>("text.fontFamily","Arial")));
+                    font.setPixelSize(std::max(1,qRound(fontSize*layer.sourceHeight/90.0)));
+                }
                 if (style == "bold" || style == "cyber") {
                     font.setBold(true);
                 }
+                if (clip.hasParam("text.fontFamily")) font.setFamily(QString::fromStdString(clip.getParam<std::string>("text.fontFamily","Arial")));
+                if (clip.hasParam("text.fontWeight")) font.setBold(clip.getParam<std::string>("text.fontWeight","normal")=="bold");
+                font.setItalic(clip.getParam<std::string>("text.fontStyle","normal")=="italic");
+                font.setUnderline(clip.getParam<std::string>("text.textDecoration","none")=="underline");
+                font.setStrikeOut(clip.getParam<std::string>("text.textDecoration","none")=="line-through");
                 painter.setFont(font);
 
                 QColor textColor(QString::fromStdString(colorStr));
@@ -228,6 +256,9 @@ const CompositorOutput& RenderEngine::renderFrame(
                 }
 
                 // Drop shadow
+                const auto align=clip.getParam<std::string>("text.textAlign","center");
+                flags &= ~(Qt::AlignLeft | Qt::AlignRight | Qt::AlignHCenter);
+                flags |= align=="left"?Qt::AlignLeft:align=="right"?Qt::AlignRight:Qt::AlignHCenter;
                 painter.setPen(QColor(0, 0, 0, 220));
                 painter.drawText(rect.translated(2, 2), flags, QString::fromStdString(textContent));
 
@@ -267,14 +298,16 @@ const CompositorOutput& RenderEngine::renderFrame(
 
                     if (shape == "circle") {
                         painter.drawEllipse(QPoint(cx, cy), size / 2, size / 2);
-                    } else if (shape == "star") {
-                        QPolygon star;
-                        for (int i = 0; i < 5; ++i) {
-                            double a1 = i * 4.0 * 3.14159265358979323846 / 5.0 - 3.14159265358979323846 / 2.0;
-                            star << QPoint(cx + static_cast<int>(std::cos(a1) * size / 2),
-                                           cy + static_cast<int>(std::sin(a1) * size / 2));
+                    } else if (shape == "star" || shape == "polygon") {
+                        QPolygonF polygon;
+                        const bool star = shape == "star";
+                        const int vertices = star ? 10 : 5;
+                        for (int i = 0; i < vertices; ++i) {
+                            const double angle = i * 2.0 * 3.14159265358979323846 / vertices - 3.14159265358979323846 / 2.0;
+                            const double radius = size / 2.0 * (star && (i % 2) ? 0.45 : 1.0);
+                            polygon << QPointF(cx + std::cos(angle) * radius, cy + std::sin(angle) * radius);
                         }
-                        painter.drawPolygon(star);
+                        painter.drawPolygon(polygon);
                     } else {
                         // Rectangle
                         painter.drawRoundedRect(QRect(cx - size, cy - size / 2, size * 2, size), cornerRadius, cornerRadius);

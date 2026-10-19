@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(CatchimApp VERSION 0.1.0 LANGUAGES CXX)
 
+# An unset build type otherwise produces -O0 WASM: the per-pixel preview
+# compositor then cannot keep up with playback, even with native decoding.
+if(EMSCRIPTEN AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -14,6 +20,12 @@ if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
+    if(EMSCRIPTEN)
+        # Qt's multithreaded WASM kit links with shared memory. Every app
+        # translation unit (including the platform-neutral core libraries)
+        # must be compiled with the matching atomics/bulk-memory features.
+        add_compile_options(-pthread)
+    endif()
 endif()
 
 # Output directories
@@ -36,8 +48,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
-# Check for Qt6
-find_package(Qt6 COMPONENTS Core Gui Widgets Svg OpenGL QUIET)
+# Check for the portable Qt modules first. Qt WebEngine is a desktop-only
+# module, so including it in the main component lookup makes a valid
+# Qt-for-WebAssembly installation look like Qt is missing altogether.
+find_package(Qt6 COMPONENTS Core Gui Widgets Svg OpenGL Network QUIET)
 if(Qt6_FOUND)
     message(STATUS "Qt6 found: ${Qt6_VERSION}")
     set(HAVE_QT6 ON)
@@ -45,6 +59,17 @@ if(Qt6_FOUND)
     set(CMAKE_AUTOMOC ON)
     set(CMAKE_AUTORCC ON)
     set(CMAKE_AUTOUIC ON)
+
+    # Qt WebEngine embeds Chromium and is not available in Qt for WebAssembly.
+    # Keep it an optional desktop host rather than a requirement for Qt UI.
+    if(NOT EMSCRIPTEN)
+        find_package(Qt6 COMPONENTS WebEngineWidgets WebChannel QUIET)
+        if(TARGET Qt6::WebEngineWidgets AND TARGET Qt6::WebChannel)
+            message(STATUS "Qt WebEngine desktop host enabled")
+            set(HAVE_QT6_WEBENGINE ON)
+            add_compile_definitions(HAVE_QT6_WEBENGINE HAVE_QT6_WEBCHANNEL)
+        endif()
+    endif()
 else()
     message(STATUS "Qt6 not found directly on system path. Core, Editor, Media, and Tests can still build.")
     set(HAVE_QT6 OFF)
@@ -452,7 +477,7 @@ add_library(catchim_media STATIC
 )
 target_link_libraries(catchim_media PUBLIC catchim_core catchim_editor catchim_storage)
 if(WIN32)
-    target_link_libraries(catchim_media PUBLIC mfplat mfreadwrite mfuuid propsys)
+    target_link_libraries(catchim_media PUBLIC mfplat mfreadwrite mfuuid propsys d3d11 dxgi)
 endif()
 if(HAVE_QT6)
     target_link_libraries(catchim_media PUBLIC Qt6::Gui)
@@ -576,6 +601,7 @@ if(HAVE_QT6)
 endif()
 
 add_library(catchim_audio STATIC
+    src/audio/PlaybackAudioSession.cpp
     src/audio/AudioBuffer.h
     src/audio/AudioMixer.cpp
     src/audio/AudioMixer.h
@@ -657,11 +683,13 @@ target_link_libraries(catchim_storage PUBLIC catchim_editor)
 # App target (CLI / Desktop executable)
 if(HAVE_QT6)
     add_library(catchim_ui STATIC
+        resources/fonts.qrc
         src/ui/icons/UiIcons.cpp
         src/ui/icons/UiIcons.h
         src/ui/theme/Colors.h
         src/ui/theme/Metrics.h
         src/ui/theme/Theme.cpp
+        resources/web-assets.qrc
         src/ui/theme/Theme.h
         src/ui/MainWindow.cpp
         src/ui/MainWindow.h
@@ -687,6 +715,10 @@ if(HAVE_QT6)
         src/ui/timeline/TimelinePanel.h
         src/ui/export/ExportDialog.cpp
         src/ui/export/ExportDialog.h
+        src/ui/export/ExportWorker.cpp
+        src/ui/export/ExportWorker.h
+        src/ui/projects/ProjectsHubDialog.cpp
+        src/ui/projects/ProjectsHubDialog.h
     )
     target_link_libraries(catchim_ui PUBLIC
         catchim_editor
@@ -696,17 +728,93 @@ if(HAVE_QT6)
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
+        Qt6::Network
         Qt6::Svg
         Qt6::OpenGL
     )
 
-    add_executable(catchim_app
+    # The editor paints into QWidget/QPainter and does not require the
+    # desktop-only QOpenGLWidget wrapper. Link it only when the kit provides it.
+    if(TARGET Qt6::OpenGLWidgets)
+        target_link_libraries(catchim_ui PUBLIC Qt6::OpenGLWidgets)
+    endif()
+
+    if(HAVE_QT6_WEBENGINE)
+        target_sources(catchim_ui PRIVATE
+            src/bridge/NativeBridge.cpp
+            src/bridge/NativeBridge.h
+            src/window/WebMainWindow.cpp
+            src/window/WebMainWindow.h
+        )
+        target_link_libraries(catchim_ui PUBLIC
+            Qt6::WebEngineWidgets
+            Qt6::WebChannel
+        )
+    endif()
+
+    set(CATCHIM_APP_SOURCES
         src/main.cpp
         src/app/Application.cpp
         src/app/Application.h
         src/app/AppConfig.cpp
         src/app/AppConfig.h
     )
+    if(EMSCRIPTEN AND COMMAND qt_add_executable)
+        # Qt's helper emits the HTML/JS/WASM browser launcher alongside the
+        # module; a plain add_executable only describes the native desktop app.
+        qt_add_executable(catchim_app MANUAL_FINALIZATION ${CATCHIM_APP_SOURCES})
+        # Qt for WebAssembly is statically linked; its platform integration
+        # plugin must be imported into the executable, not searched for at
+        # runtime as a filesystem plugin.
+        qt_import_plugins(catchim_app INCLUDE Qt6::QWasmIntegrationPlugin)
+        # Persist Qt/C++ filesystem data (projects and browser-imported assets)
+        # in the browser's IndexedDB-backed Emscripten filesystem.
+        target_link_options(catchim_app PRIVATE
+            "$<$<CONFIG:Release>:-O1>"
+            "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-persistence.js"
+            "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-webgpu.js"
+            "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-media.js"
+            "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-audio.js"
+            "SHELL:-lidbfs.js"
+            "SHELL:-sUSE_WEBGPU=1"
+        )
+        set_property(TARGET catchim_app APPEND PROPERTY LINK_DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-persistence.js
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-webgpu.js
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-media.js
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-audio.js
+        )
+        qt_finalize_executable(catchim_app)
+        set(CATCHIM_WASM_PLAYBACK_TEST_MEDIA "" CACHE FILEPATH "Optional MP4 for the browser playback regression")
+        if(CATCHIM_WASM_PLAYBACK_TEST_MEDIA)
+            qt_add_executable(catchim_wasm_playback MANUAL_FINALIZATION
+                tests/wasm_playback_regression.cpp src/app/AppConfig.cpp)
+            qt_import_plugins(catchim_wasm_playback INCLUDE Qt6::QWasmIntegrationPlugin)
+            target_link_libraries(catchim_wasm_playback PRIVATE catchim_ui catchim_storage catchim_export)
+            target_link_options(catchim_wasm_playback PRIVATE
+                "$<$<CONFIG:Release>:-O1>"
+                "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-media.js"
+                "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-audio.js"
+                "SHELL:--embed-file '${CATCHIM_WASM_PLAYBACK_TEST_MEDIA}@/playback-test.mp4'")
+            set_property(TARGET catchim_wasm_playback APPEND PROPERTY LINK_DEPENDS
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-media.js
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/wasm-audio.js
+                ${CATCHIM_WASM_PLAYBACK_TEST_MEDIA})
+            qt_finalize_executable(catchim_wasm_playback)
+        endif()
+        add_custom_command(TARGET catchim_app POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/catchim_app.html
+                -DDESTINATION=$<TARGET_FILE_DIR:catchim_app>
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/install-wasm-launcher.cmake
+            COMMENT "Installing Catchim browser launcher"
+        )
+    else()
+        add_executable(catchim_app ${CATCHIM_APP_SOURCES})
+    endif()
+    if(NOT EMSCRIPTEN)
+        set_target_properties(catchim_app PROPERTIES OUTPUT_NAME "Catchim")
+    endif()
     target_link_libraries(catchim_app PRIVATE catchim_ui catchim_storage catchim_export)
 else()
     # Build core engine runner / console host when Qt6 is not yet linked
@@ -728,5 +836,21 @@ else()
 endif()
 
 # Parity & Unit tests
+if(EMSCRIPTEN)
+    # No Qt widgets, video decoding or pixel transfers in the browser core.
+    add_executable(catchim_browser_core src/wasm/BrowserEditorCore.cpp)
+    target_link_libraries(catchim_browser_core PRIVATE catchim_editor)
+    set_target_properties(catchim_browser_core PROPERTIES SUFFIX ".mjs" AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+	target_compile_options(catchim_browser_core PRIVATE -fexceptions)
+    target_link_options(catchim_browser_core PRIVATE
+        -O2 -pthread -fexceptions --no-entry
+        "-sMODULARIZE=1" "-sEXPORT_ES6=1" "-sEXPORT_NAME=createCatchimBrowserCore"
+        "-sALLOW_MEMORY_GROWTH=1" "-sENVIRONMENT=web,worker,node"
+        "-sSTACK_SIZE=1048576"
+        "-sEXPORTED_FUNCTIONS=['_catchim_browser_request','_malloc','_free']"
+        "-sEXPORTED_RUNTIME_METHODS=['UTF8ToString']")
+endif()
 enable_testing()
-add_subdirectory(tests)
+if(NOT EMSCRIPTEN)
+    add_subdirectory(tests)
+endif()

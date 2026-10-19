@@ -10,6 +10,7 @@ namespace catchim::ui {
 
 enum class UiIcon {
     Media,
+    CloudUpload,
     Audio,
     Text,
     Stickers,
@@ -55,7 +56,29 @@ enum class UiIcon {
     VolumeMute,
     Grid,
     Keyboard,
-    Check
+    Check,
+    List,
+    Clock,
+    Folder,
+    Edit,
+    MoreHorizontal,
+    ArrowDown,
+    ArrowUp,
+    Info,
+    Logo,
+    Upload,
+    Ripple,
+    Bookmark,
+    Video,
+    Layers,
+    Snow,
+    SortOneNine,
+    SlidersBox,
+    Music,
+    Transform,
+    Font,
+    Drop,
+    Speed
 };
 
 class UiIcons {

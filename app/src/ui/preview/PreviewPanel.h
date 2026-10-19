@@ -23,11 +23,13 @@ public:
     );
 
     void refresh();
+    void updateFrame();        // decode current frame (called from app tick)
+    void markFrameDirty();     // force re-render on next updateFrame()
     void toggleSafeZones();
     void toggleFullscreen();
 
     QSize sizeHint() const override { return QSize(760, 600); }
-    QSize minimumSizeHint() const override { return QSize(380, 300); }
+    QSize minimumSizeHint() const override { return QSize(320, 180); }
 
 private slots:
     void onPlayPauseClicked();

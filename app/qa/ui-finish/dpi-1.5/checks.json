@@ -1,0 +1,138 @@
+{
+    "checks": [
+        {
+            "name": "spin-arrows-use-svg",
+            "passed": true
+        },
+        {
+            "name": "scrollbar-native-border-removed",
+            "passed": true
+        },
+        {
+            "name": "preview-has-no-obstructing-tooltip",
+            "passed": true
+        },
+        {
+            "name": "inspector-hint-opens-right",
+            "passed": true
+        },
+        {
+            "name": "timeline-tooltip-labels-have-no-parenthetical-hints",
+            "passed": true
+        },
+        {
+            "name": "playhead-full-left-half-visible-at-zero",
+            "passed": true
+        },
+        {
+            "name": "playhead-ruler-and-track-line-width-match",
+            "passed": true
+        },
+        {
+            "name": "playhead-left-half-drags-without-jump",
+            "passed": true
+        },
+        {
+            "name": "inspector-no-overflow-1280",
+            "passed": true
+        },
+        {
+            "name": "field-not-covered-1280-property_text.fontSize",
+            "passed": true
+        },
+        {
+            "name": "field-not-covered-1280-property_text.fontWeight",
+            "passed": true
+        },
+        {
+            "name": "field-not-covered-1280-property_text.fontFamily",
+            "passed": true
+        },
+        {
+            "name": "field-not-covered-1280-property_text.content",
+            "passed": true
+        },
+        {
+            "name": "inspector-no-overflow-1912",
+            "passed": true
+        },
+        {
+            "name": "field-not-covered-1912-property_text.fontSize",
+            "passed": true
+        },
+        {
+            "name": "field-not-covered-1912-property_text.fontWeight",
+            "passed": true
+        },
+        {
+            "name": "field-not-covered-1912-property_text.fontFamily",
+            "passed": true
+        },
+        {
+            "name": "field-not-covered-1912-property_text.content",
+            "passed": true
+        },
+        {
+            "name": "english-option-present",
+            "passed": true
+        },
+        {
+            "name": "language-popup-compact",
+            "passed": true
+        },
+        {
+            "name": "english-switch-translates-ui",
+            "passed": true
+        },
+        {
+            "name": "shortcuts-single-native-card",
+            "passed": true
+        },
+        {
+            "name": "color-dialog-themed-card",
+            "passed": true
+        },
+        {
+            "name": "color-picker-applies-entered-hex",
+            "passed": true
+        },
+        {
+            "name": "canvas-size-themed-card",
+            "passed": true
+        },
+        {
+            "name": "export-themed-card",
+            "passed": true
+        },
+        {
+            "name": "exportResolution-complete-control",
+            "passed": true
+        },
+        {
+            "name": "exportFormat-complete-control",
+            "passed": true
+        },
+        {
+            "name": "exportQuality-complete-control",
+            "passed": true
+        },
+        {
+            "name": "exportAudio-complete-control",
+            "passed": true
+        },
+        {
+            "name": "source-probed",
+            "passed": true
+        },
+        {
+            "name": "trimmed-video-entire-filmstrip-fills",
+            "passed": true
+        },
+        {
+            "name": "ffmpeg-present",
+            "passed": true
+        }
+    ],
+    "filmstripColdMs": 732,
+    "passed": true
+}

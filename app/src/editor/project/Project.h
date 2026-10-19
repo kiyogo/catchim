@@ -29,6 +29,24 @@ class Scene {
 public:
     Scene(core::SceneId id, std::string name, bool isMain = false)
         : id_(std::move(id)), name_(std::move(name)), isMain_(isMain) {}
+    // Keep command references stable when the scene vector grows or is reordered.
+    // Normal copies remain independent (export snapshots, duplicated projects).
+    Scene(const Scene& other)
+        : id_(other.id_), name_(other.name_), isMain_(other.isMain_),
+          timeline_(std::make_shared<Timeline>(*other.timeline_)) {}
+    Scene& operator=(const Scene& other) {
+        if(this!=&other){
+            id_=other.id_;name_=other.name_;isMain_=other.isMain_;
+            if(!timeline_)timeline_=std::make_shared<Timeline>(*other.timeline_);
+            else *timeline_=*other.timeline_;
+        }
+        return *this;
+    }
+    Scene(Scene&&) noexcept = default;
+    Scene& operator=(Scene&&) noexcept = default;
+    Scene shareTimelineForHistory() const {
+        Scene result(id_,name_,isMain_);result.timeline_=timeline_;return result;
+    }
 
     const core::SceneId& id() const noexcept { return id_; }
     const std::string& name() const noexcept { return name_; }
@@ -36,14 +54,14 @@ public:
     bool isMain() const noexcept { return isMain_; }
     void setIsMain(bool isMain) noexcept { isMain_ = isMain; }
 
-    const Timeline& timeline() const noexcept { return timeline_; }
-    Timeline& timeline() noexcept { return timeline_; }
+    const Timeline& timeline() const noexcept { return *timeline_; }
+    Timeline& timeline() noexcept { return *timeline_; }
 
 private:
     core::SceneId id_;
     std::string name_;
     bool isMain_{false};
-    Timeline timeline_;
+    std::shared_ptr<Timeline> timeline_{std::make_shared<Timeline>()};
 };
 
 class Project {

@@ -4,6 +4,7 @@
  */
 
 import { getNativeTimelineBindings, warmNativeTimelineCore } from "./opencut-core";
+import { webGpuEngine } from "./webgpu-engine";
 
 const TICKS_PER_SECOND_CONST = 120_000;
 export function TICKS_PER_SECOND(): number {
@@ -23,9 +24,12 @@ export interface FrameRate {
 
 export type TimeCodeFormat = "MM:SS" | "HH:MM:SS" | "HH:MM:SS:CS" | "HH:MM:SS:FF";
 
-// Ensure native C++ core is loaded in browser
+// Ensure native C++ core and WebGPU acceleration are loaded in browser
 if (typeof window !== "undefined") {
 	warmNativeTimelineCore();
+	initializeGpu().catch((err) => {
+		console.warn("[WebGPU] Auto-init fallback notice:", err);
+	});
 }
 
 function getTicksPerFrame(rate: FrameRate): number | null {
@@ -288,23 +292,92 @@ export function parseTimecode({
 	}
 }
 
-// Compositor & GPU Engine Implementation
+// Compositor & WebGPU Engine Implementation
 let compositorCanvas: HTMLCanvasElement | null = null;
-const textures = new Map<string, { source: CanvasImageSource; width: number; height: number }>();
+let compositorGpuContext: GPUCanvasContext | null = null;
+let compositor2dContext: CanvasRenderingContext2D | null = null;
+interface TextureEntry {
+	source: CanvasImageSource;
+	width: number;
+	height: number;
+	gpuTexture?: GPUTexture | null;
+	lastVideoTime?: number;
+	version?: number | string;
+	dirty?: boolean;
+}
+const textures = new Map<string, TextureEntry>();
+
+function ensureCompositorContext(): void {
+	if (!compositorCanvas) return;
+	if (compositorGpuContext && !webGpuEngine.isAvailable) {
+		// A canvas cannot change context type after creation. On device loss,
+		// replace the surface and continue through the real 2D fallback.
+		const next = document.createElement("canvas");
+		next.width = compositorCanvas.width; next.height = compositorCanvas.height;
+		next.id = compositorCanvas.id; next.className = compositorCanvas.className;
+		next.style.cssText = compositorCanvas.style.cssText;
+		compositorCanvas.replaceWith(next); compositorCanvas = next;
+		compositorGpuContext = null; compositor2dContext = null;
+	}
+	if (compositorGpuContext || compositor2dContext) return;
+
+	if (webGpuEngine.isAvailable && webGpuEngine.device) {
+		try {
+			const ctx = compositorCanvas.getContext("webgpu") as GPUCanvasContext | null;
+			if (ctx) {
+				compositorGpuContext = ctx;
+				compositorCanvas.setAttribute("data-engine", "webgpu");
+				if (webGpuEngine.device) {
+					ctx.configure({
+						device: webGpuEngine.device,
+						format: webGpuEngine.preferredFormat,
+						alphaMode: "premultiplied",
+					});
+					console.info("%c[Compositor] WebGPU hardware context configured successfully.", "color: #06b6d4; font-weight: bold;");
+				}
+				return;
+			}
+		} catch (e) {
+			console.warn("[WebGPU] Could not acquire webgpu context:", e);
+		}
+	}
+
+	try {
+		compositor2dContext = compositorCanvas.getContext("2d");
+		compositorCanvas.setAttribute("data-engine", "canvas-2d-fallback");
+	} catch (e) {
+		// Context creation failure fallback
+	}
+}
 
 export function initCompositor(width: number, height: number): void {
 	if (typeof document === "undefined") return;
 	if (!compositorCanvas) {
 		compositorCanvas = document.createElement("canvas");
+		compositorCanvas.id = "opencut-webgpu-viewport";
+		compositorCanvas.className = "opencut-webgpu-compositor";
+		compositorCanvas.setAttribute("data-engine", "webgpu");
 	}
 	compositorCanvas.width = width;
 	compositorCanvas.height = height;
+	ensureCompositorContext();
 }
 
 export function resizeCompositor(width: number, height: number): void {
 	if (compositorCanvas) {
 		compositorCanvas.width = width;
 		compositorCanvas.height = height;
+		if (compositorGpuContext && webGpuEngine.device) {
+			try {
+				compositorGpuContext.configure({
+					device: webGpuEngine.device,
+					format: webGpuEngine.preferredFormat,
+					alphaMode: "premultiplied",
+				});
+			} catch (e) {
+				console.warn("[WebGPU] Resize reconfigure error:", e);
+			}
+		}
 	}
 }
 
@@ -313,15 +386,74 @@ export function getCompositorCanvas(): HTMLCanvasElement {
 		compositorCanvas = document.createElement("canvas");
 		compositorCanvas.width = 1920;
 		compositorCanvas.height = 1080;
+		compositorCanvas.id = "opencut-webgpu-viewport";
+		compositorCanvas.className = "opencut-webgpu-compositor";
+		compositorCanvas.setAttribute("data-engine", "webgpu");
 	}
+	ensureCompositorContext();
 	return compositorCanvas!;
 }
 
-export function uploadTexture(descriptor: { id: string; source: CanvasImageSource; width: number; height: number }): void {
-	textures.set(descriptor.id, descriptor);
+export function uploadTexture(descriptor: {
+	id: string;
+	source: CanvasImageSource;
+	width: number;
+	height: number;
+	version?: number | string;
+}): void {
+	const existing = textures.get(descriptor.id);
+	if (existing) {
+		const isSameSize =
+			existing.width === descriptor.width && existing.height === descriptor.height;
+		if (isSameSize) {
+			const sourceChanged = existing.source !== descriptor.source;
+			existing.source = descriptor.source;
+			if (descriptor.version !== undefined) {
+				if (existing.version !== descriptor.version) {
+					existing.version = descriptor.version;
+					existing.dirty = true;
+				}
+			} else if (
+				typeof HTMLVideoElement !== "undefined" &&
+				descriptor.source instanceof HTMLVideoElement
+			) {
+				if (descriptor.source.currentTime !== existing.lastVideoTime) {
+					existing.lastVideoTime = descriptor.source.currentTime;
+					existing.dirty = true;
+				}
+			} else if (sourceChanged) {
+				existing.dirty = true;
+			} else {
+				// Rendered canvases keep identity while their pixels change.
+				existing.dirty = true;
+			}
+			return;
+		}
+		if (existing.gpuTexture) {
+			webGpuEngine.releaseTexture(existing.gpuTexture);
+		}
+	}
+
+	textures.set(descriptor.id, {
+		source: descriptor.source,
+		width: descriptor.width,
+		height: descriptor.height,
+		gpuTexture: null,
+		version: descriptor.version,
+		lastVideoTime:
+			typeof HTMLVideoElement !== "undefined" &&
+			descriptor.source instanceof HTMLVideoElement
+				? descriptor.source.currentTime
+				: undefined,
+		dirty: true,
+	});
 }
 
 export function releaseTexture(id: string): void {
+	const existing = textures.get(id);
+	if (existing?.gpuTexture) {
+		webGpuEngine.releaseTexture(existing.gpuTexture);
+	}
 	textures.delete(id);
 }
 
@@ -330,51 +462,194 @@ let lastFrameProfile = {
 	layerCount: 0,
 };
 
+let blendSurface: OffscreenCanvas | null = null;
+let layerSurface: OffscreenCanvas | null = null;
+let filterSurface: OffscreenCanvas | null = null;
+let blendTexture: GPUTexture | null = null;
+function surface(previous: OffscreenCanvas | null, width: number, height: number) {
+	return previous?.width === width && previous.height === height ? previous : new OffscreenCanvas(width, height);
+}
+function blurSigma(groups: any[][] = []) {
+	let x = 0, y = 0;
+	for (const pass of groups.flat()) {
+		if (pass.shader !== "gaussian-blur") continue;
+		const sigma = Number(pass.uniforms.u_sigma ?? 0) * Number(pass.uniforms.u_step ?? 1);
+		const direction = pass.uniforms.u_direction ?? [1, 0];
+		x += sigma * sigma * direction[0] * direction[0]; y += sigma * sigma * direction[1] * direction[1];
+	}
+	return Math.sqrt(Math.max(x, y));
+}
+function drawFrame2D(frame: any, ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) {
+	const { width, height } = frame;
+	layerSurface = surface(layerSurface, width, height);
+	filterSurface = surface(filterSurface, width, height);
+	const layer = layerSurface.getContext("2d")!;
+	const filter = filterSurface.getContext("2d")!;
+	ctx.resetTransform(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.filter = "none";
+	ctx.clearRect(0, 0, width, height);
+	const [r, g, b, a] = frame.clear?.color ?? [0, 0, 0, 1];
+	ctx.fillStyle = `rgba(${r * 255},${g * 255},${b * 255},${a})`; ctx.fillRect(0, 0, width, height);
+	for (const item of frame.items ?? []) {
+		if (item.type === "sceneEffect") {
+			const sigma = blurSigma(item.effectPassGroups);
+			if (sigma > 0) {
+				filter.clearRect(0, 0, width, height); filter.filter = `blur(${sigma}px)`;
+				filter.drawImage(ctx.canvas, 0, 0); filter.filter = "none";
+				ctx.clearRect(0, 0, width, height); ctx.drawImage(filterSurface, 0, 0);
+			}
+			continue;
+		}
+		const texture = textures.get(item.textureId);
+		if (!texture) continue;
+		layer.resetTransform(); layer.globalAlpha = 1; layer.globalCompositeOperation = "source-over"; layer.filter = "none";
+		layer.clearRect(0, 0, width, height);
+		layer.save();
+		const sigma = blurSigma(item.effectPassGroups);
+		if (sigma > 0) layer.filter = `blur(${sigma}px)`;
+		const t = item.transform;
+		if (t) {
+			layer.translate(t.centerX, t.centerY); layer.rotate((t.rotationDegrees || 0) * Math.PI / 180);
+			layer.scale(t.flipX ? -1 : 1, t.flipY ? -1 : 1);
+			layer.drawImage(texture.source, -t.width / 2, -t.height / 2, t.width, t.height);
+		} else layer.drawImage(texture.source, 0, 0, width, height);
+		layer.restore();
+		const mask = item.mask ? textures.get(item.mask.textureId) : null;
+		if (mask) {
+			layer.save(); layer.globalCompositeOperation = item.mask.inverted ? "destination-out" : "destination-in";
+			layer.filter = item.mask.feather > 0 ? `blur(${item.mask.feather / 2}px)` : "none";
+			layer.drawImage(mask.source, 0, 0, width, height); layer.restore();
+		}
+		ctx.save(); ctx.globalAlpha = item.opacity ?? 1;
+		ctx.globalCompositeOperation = !item.blendMode || item.blendMode === "normal" ? "source-over" : item.blendMode;
+		ctx.drawImage(layerSurface, 0, 0); ctx.restore();
+	}
+}
+
 export function renderFrame(frame: any): void {
 	if (!compositorCanvas) return;
 	const startTime = typeof performance !== "undefined" ? performance.now() : 0;
-	const ctx = compositorCanvas.getContext("2d");
-	if (!ctx) return;
-
-	if (frame.clear?.color) {
-		const [r, g, b, a] = frame.clear.color;
-		ctx.fillStyle = `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${a})`;
-		ctx.fillRect(0, 0, compositorCanvas.width, compositorCanvas.height);
-	} else {
-		ctx.clearRect(0, 0, compositorCanvas.width, compositorCanvas.height);
-	}
+	ensureCompositorContext();
 
 	let layerCount = 0;
-	if (frame.items) {
-		for (const item of frame.items) {
-			if (item.type === "layer" && item.textureId) {
-				const tex = textures.get(item.textureId);
-				if (!tex) continue;
+	// Canvas blend modes preserve the editor's full blend catalogue. Keep the
+	// normal video/transform path on WebGPU without these intermediate surfaces.
+	const canvasBlendRequired = frame.items?.some((item: any) => item.type === "layer" && item.blendMode && item.blendMode !== "normal");
+	if (compositorGpuContext && webGpuEngine.isAvailable && canvasBlendRequired) {
+		blendSurface = surface(blendSurface, frame.width, frame.height);
+		drawFrame2D(frame, blendSurface.getContext("2d")!);
+		if (blendTexture && (blendTexture.width !== frame.width || blendTexture.height !== frame.height)) { blendTexture.destroy(); blendTexture = null; }
+		if (!blendTexture) blendTexture = webGpuEngine.uploadImageToTexture(blendSurface);
+		else webGpuEngine.updateTextureFromImage(blendTexture, blendSurface, frame.width, frame.height);
+		if (blendTexture) webGpuEngine.renderFrameLayers({ context: compositorGpuContext, width: frame.width, height: frame.height, layers: [{ texture: blendTexture }] });
+		lastFrameProfile = { renderTimeMs: performance.now() - startTime, layerCount: frame.items.length };
+		return;
+	}
 
-				ctx.save();
-				ctx.globalAlpha = item.opacity ?? 1.0;
+	if (compositorGpuContext && webGpuEngine.isAvailable && webGpuEngine.device) {
+		const temporaries: GPUTexture[] = [];
+		webGpuEngine.beginEffectsFrame();
+		const clearColor: [number, number, number, number] = frame.clear?.color ?? [0, 0, 0, 1];
+		const gpuLayers: Array<{
+			texture: GPUTexture;
+			maskTexture?: GPUTexture;
+			maskInverted?: boolean;
+			opacity?: number;
+			transform?: any;
+		}> = [];
 
-				// Blend mode mapping
-				if (item.blendMode && item.blendMode !== "normal") {
-					ctx.globalCompositeOperation = item.blendMode;
+		if (frame.items) {
+			for (const item of frame.items) {
+				if (item.type === "sceneEffect") {
+					const target = webGpuEngine.acquireTexture({ width: compositorCanvas.width, height: compositorCanvas.height, format: webGpuEngine.preferredFormat, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+					temporaries.push(target);
+					webGpuEngine.renderFrameLayers({ context: compositorGpuContext, targetTexture: target, width: compositorCanvas.width, height: compositorCanvas.height, clearColor, layers: gpuLayers });
+					const filtered = webGpuEngine.applyBlurPasses(target, (item.effectPassGroups ?? []).flat(), temporaries);
+					gpuLayers.splice(0, gpuLayers.length, { texture: filtered });
+					continue;
 				}
+				if (item.type === "layer" && item.textureId) {
+					const tex = textures.get(item.textureId);
+					if (!tex) continue;
 
-				const t = item.transform;
-				if (t) {
-					ctx.translate(t.centerX, t.centerY);
-					if (t.rotationDegrees) {
-						ctx.rotate((t.rotationDegrees * Math.PI) / 180);
+					// Check if video element advanced to a new frame
+					if (typeof HTMLVideoElement !== "undefined" && tex.source instanceof HTMLVideoElement) {
+						if (tex.source.currentTime !== tex.lastVideoTime) {
+							tex.lastVideoTime = tex.source.currentTime;
+							tex.dirty = true;
+						}
 					}
-					ctx.scale(t.flipX ? -1 : 1, t.flipY ? -1 : 1);
-					ctx.drawImage(tex.source, -t.width / 2, -t.height / 2, t.width, t.height);
-				} else {
-					ctx.drawImage(tex.source, 0, 0, compositorCanvas.width, compositorCanvas.height);
-				}
 
-				ctx.restore();
-				layerCount++;
+					// Update or upload GPU texture ONLY when dirty or not yet on GPU
+					if (!tex.gpuTexture || tex.dirty) {
+						if (tex.gpuTexture) {
+							const updated = webGpuEngine.updateTextureFromImage(
+								tex.gpuTexture,
+								tex.source as any,
+								tex.width,
+								tex.height,
+							);
+							if (updated) {
+								tex.dirty = false;
+							} else {
+								webGpuEngine.releaseTexture(tex.gpuTexture);
+								tex.gpuTexture = webGpuEngine.uploadImageToTexture(tex.source as any);
+								tex.dirty = false;
+							}
+						} else {
+							try {
+								tex.gpuTexture = webGpuEngine.uploadImageToTexture(tex.source as any);
+								tex.dirty = false;
+							} catch (err) {
+								console.warn("[WebGPU] Texture upload failed:", err);
+							}
+						}
+					}
+
+					if (tex.gpuTexture) {
+						let maskTexture: GPUTexture | undefined;
+						const mask = item.mask ? textures.get(item.mask.textureId) : undefined;
+						if (mask) {
+							if (!mask.gpuTexture) mask.gpuTexture = webGpuEngine.uploadImageToTexture(mask.source as any);
+							else if (mask.dirty) webGpuEngine.updateTextureFromImage(mask.gpuTexture, mask.source as any, mask.width, mask.height);
+							mask.dirty = false;
+							maskTexture = mask.gpuTexture ?? undefined;
+							if (maskTexture && item.mask.feather > 0) {
+								const sigma = Math.max(.1, item.mask.feather / 2);
+								maskTexture = webGpuEngine.applyBlurPasses(maskTexture, [
+									{ shader: "gaussian-blur", uniforms: { u_sigma: sigma, u_direction: [1, 0] } },
+									{ shader: "gaussian-blur", uniforms: { u_sigma: sigma, u_direction: [0, 1] } },
+								], temporaries);
+							}
+						}
+						gpuLayers.push({
+							texture: webGpuEngine.applyBlurPasses(tex.gpuTexture, (item.effectPassGroups ?? []).flat(), temporaries),
+							maskTexture, maskInverted: item.mask?.inverted,
+							opacity: item.opacity ?? 1.0,
+							transform: item.transform,
+						});
+						layerCount++;
+					}
+				}
 			}
 		}
+
+		try {
+			webGpuEngine.renderFrameLayers({
+				context: compositorGpuContext,
+				width: compositorCanvas.width,
+				height: compositorCanvas.height,
+				clearColor,
+				layers: gpuLayers,
+			});
+		} catch (err) {
+			console.warn("[WebGPU] Render pass failed:", err);
+		} finally {
+			for (const texture of temporaries) webGpuEngine.releaseTexture(texture);
+		}
+	} else if (compositor2dContext) {
+		drawFrame2D(frame, compositor2dContext);
+		lastFrameProfile = { renderTimeMs: performance.now() - startTime, layerCount: frame.items?.length ?? 0 };
+		return;
 	}
 
 	if (typeof performance !== "undefined") {
@@ -386,12 +661,36 @@ export function renderFrame(frame: any): void {
 }
 
 export function getLastFrameProfile(): any {
-	return lastFrameProfile;
+	return [{ name: "compositorSubmit", durationMs: lastFrameProfile.renderTimeMs }];
 }
 
 export async function initializeGpu(): Promise<void> {
-	// Initialize GPU / C++ native accelerator
 	warmNativeTimelineCore();
+	if (typeof window !== "undefined" && typeof navigator !== "undefined" && navigator.gpu) {
+		try {
+			const success = await webGpuEngine.initialize();
+			if (success && webGpuEngine.device && compositorCanvas) {
+				try {
+					if (!compositorGpuContext) {
+						compositorGpuContext = compositorCanvas.getContext("webgpu") as GPUCanvasContext | null;
+					}
+					if (compositorGpuContext) {
+						compositorGpuContext.configure({
+							device: webGpuEngine.device,
+							format: webGpuEngine.preferredFormat,
+							alphaMode: "premultiplied",
+						});
+						compositor2dContext = null;
+						console.info("%c[Compositor] WebGPU hardware context active and configured.", "color: #10b981; font-weight: bold;");
+					}
+				} catch (e) {
+					console.warn("[WebGPU] Canvas context configure notice:", e);
+				}
+			}
+		} catch (err) {
+			console.warn("[WebGPU] Initialization error:", err);
+		}
+	}
 }
 
 export function applyEffectPasses({

@@ -5,6 +5,7 @@ import { useEditor } from "@/editor/use-editor";
 import { useCommittedRef } from "@/hooks/use-committed-ref";
 import { useShiftKey } from "@/hooks/use-shift-key";
 import { registerCanceller } from "@/editor/cancel-interaction";
+import { LatestFrameTask } from "@/utils/latest-frame-task";
 import {
 	TransformHandleController,
 	type TransformHandleDeps,
@@ -53,16 +54,17 @@ export function useTransformHandles({
 	const [controller] = useState(
 		() => new TransformHandleController({ depsRef }),
 	);
+	const [pointerMove] = useState(() => new LatestFrameTask(controller.onPointerMove));
 
 	const [, rerender] = useReducer((n: number) => n + 1, 0);
 	useEffect(() => controller.subscribe(rerender), [controller]);
 
 	useEffect(() => {
 		if (!controller.isActive) return;
-		return registerCanceller({ fn: () => controller.cancel() });
+		return registerCanceller({ fn: () => { pointerMove.cancel(); controller.cancel(); } });
 	}, [controller, controller.isActive]);
 
-	useEffect(() => () => controller.destroy(), [controller]);
+	useEffect(() => () => { pointerMove.cancel(); controller.destroy(); }, [controller, pointerMove]);
 
 	const selectedWithBounds = controller.selectedWithBounds;
 	const hasVisualSelection = selectedWithBounds !== null;
@@ -74,7 +76,10 @@ export function useTransformHandles({
 		handleCornerPointerDown: controller.onCornerPointerDown,
 		handleEdgePointerDown: controller.onEdgePointerDown,
 		handleRotationPointerDown: controller.onRotationPointerDown,
-		handlePointerMove: controller.onPointerMove,
-		handlePointerUp: controller.onPointerUp,
+		handlePointerMove: pointerMove.schedule,
+		handlePointerUp: (event?: { type: string }) => {
+			if (event?.type === "pointercancel") { pointerMove.cancel(); controller.cancel(); }
+			else { pointerMove.flush(); controller.onPointerUp(); }
+		},
 	};
 }

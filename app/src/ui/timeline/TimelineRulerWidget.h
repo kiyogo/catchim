@@ -27,9 +27,10 @@ private:
     core::TimelineTime pixelToTime(int pixelX) const;
 
     editor::EditorEngine& engine_;
-    double zoomFactor_{1.0};
+    double zoomFactor_{8.82};
     int scrollOffset_{0};
     bool isDragging_{false};
+    int dragOffsetX_{0};
 };
 
 } // namespace catchim::ui

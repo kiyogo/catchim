@@ -15,6 +15,7 @@ public:
     explicit TimelineToolbar(editor::EditorEngine& engine, QWidget* parent = nullptr);
 
     void refresh();
+    void setZoomFactor(double factor);
 
 signals:
     void zoomChanged(double zoomFactor);
@@ -39,6 +40,8 @@ private:
     QPushButton* deleteBtn_{nullptr};
     QPushButton* dupBtn_{nullptr};
     QPushButton* bookmarkBtn_{nullptr};
+    QPushButton* sceneLabelBtn_{nullptr};
+    QPushButton* sceneLayersBtn_{nullptr};
     QPushButton* snapBtn_{nullptr};
     QPushButton* rippleBtn_{nullptr};
     QSlider* zoomSlider_{nullptr};

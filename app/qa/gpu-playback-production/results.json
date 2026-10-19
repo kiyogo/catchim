@@ -1,0 +1,220 @@
+{
+    "aacPrimingSeconds": 0.023219954648526078,
+    "audioBackend": 1,
+    "audioDurationDifferenceMs": 0.041666666666666664,
+    "audioReferenceCorrelation": 0.9986721234770185,
+    "audioReferenceLagFrames": 0,
+    "checks": [
+        {
+            "name": "exact-user-file-probed",
+            "passed": true
+        },
+        {
+            "name": "assets-have-no-inner-frame",
+            "passed": true
+        },
+        {
+            "name": "media-tile-has-single-line-name-and-no-tooltip",
+            "passed": true
+        },
+        {
+            "name": "timeline-clip-does-not-show-name-popup",
+            "passed": true
+        },
+        {
+            "name": "splitter-hover-is-not-full-width-blue",
+            "passed": true
+        },
+        {
+            "name": "fit-shows-complete-59-second-clip",
+            "passed": true
+        },
+        {
+            "name": "zoom-out-is-one-pixel-per-second",
+            "passed": true
+        },
+        {
+            "name": "zoom-in-has-real-scroll-range",
+            "passed": true
+        },
+        {
+            "name": "scroll-reaches-clip-end",
+            "passed": true
+        },
+        {
+            "name": "scrolled-ruler-hit-test-matches-track-time",
+            "passed": true
+        },
+        {
+            "name": "audio-device-starts-with-cold-source",
+            "passed": true
+        },
+        {
+            "name": "gpu-actually-processes-preview-frames",
+            "passed": true
+        },
+        {
+            "name": "preview-actually-paints-at-least-24-fps",
+            "passed": true
+        },
+        {
+            "name": "video-presents-at-least-24-fps",
+            "passed": true
+        },
+        {
+            "name": "video-stays-within-200ms-of-audio",
+            "passed": true
+        },
+        {
+            "name": "playhead-tracks-hardware-audio",
+            "passed": true
+        },
+        {
+            "name": "steady-audio-does-not-underrun",
+            "passed": true
+        },
+        {
+            "name": "gui-responsive-during-real-hevc-playback",
+            "passed": true
+        },
+        {
+            "name": "paused-seek-actually-presents-new-frame",
+            "passed": true
+        },
+        {
+            "name": "paused-seek-reveals-playhead",
+            "passed": true
+        },
+        {
+            "name": "latest-seek-wins-over-obsolete-decodes",
+            "passed": true
+        },
+        {
+            "name": "old-frame-cannot-overwrite-paused-seek",
+            "passed": true
+        },
+        {
+            "name": "playback-finishes-and-pauses-at-end",
+            "passed": true
+        },
+        {
+            "name": "last-second-no-audio-frames-lost",
+            "passed": true
+        },
+        {
+            "name": "end-position-preserved",
+            "passed": true
+        },
+        {
+            "name": "real-windows-sink-initializes",
+            "passed": true
+        },
+        {
+            "name": "sink-reports-partial-acceptance",
+            "passed": true
+        },
+        {
+            "name": "real-aac-decoded-at-48k-stereo",
+            "passed": true
+        },
+        {
+            "name": "independent-audio-reference",
+            "passed": true
+        },
+        {
+            "name": "aac-waveform-matches-reference",
+            "passed": true
+        },
+        {
+            "name": "aac-priming-does-not-delay-timeline",
+            "passed": true
+        },
+        {
+            "name": "resampled-audio-duration-correct",
+            "passed": true
+        },
+        {
+            "name": "audio-cache-respects-rate-and-channels",
+            "passed": true
+        },
+        {
+            "name": "gpu-preserves-original-size-and-bounds-readback",
+            "passed": true
+        },
+        {
+            "name": "gpu-color-and-crop-match-cpu-reference",
+            "passed": true
+        },
+        {
+            "name": "gpu-preserves-original-size-and-bounds-readback",
+            "passed": true
+        },
+        {
+            "name": "gpu-color-and-crop-match-cpu-reference",
+            "passed": true
+        },
+        {
+            "name": "gpu-preserves-original-size-and-bounds-readback",
+            "passed": true
+        },
+        {
+            "name": "gpu-color-and-crop-match-cpu-reference",
+            "passed": true
+        },
+        {
+            "name": "gpu-preview-keeps-transform-geometry",
+            "passed": true
+        },
+        {
+            "name": "reference-checks-used-real-gpu-not-fallback",
+            "passed": true
+        },
+        {
+            "name": "real-hevc-frame-matches-independent-reference",
+            "passed": true
+        },
+        {
+            "name": "real-hevc-frame-matches-independent-reference",
+            "passed": true
+        },
+        {
+            "name": "real-hevc-frame-matches-independent-reference",
+            "passed": true
+        }
+    ],
+    "coldAudioReadyMs": 944,
+    "cpuFallbackFrames": 0,
+    "decodedHeight_17.9": 1080,
+    "decodedHeight_18": 1080,
+    "decodedHeight_55": 1080,
+    "decodedWidth_17.9": 2030,
+    "decodedWidth_18": 2030,
+    "decodedWidth_55": 2030,
+    "duration": 59.42,
+    "frameRgbMeanError_17.9": 0.9485703642887551,
+    "frameRgbMeanError_18": 0.9464609560299215,
+    "frameRgbMeanError_55": 0.9567796326704373,
+    "gpuAdapter": "AMD Radeon RX590 GME",
+    "gpuLastError": "0",
+    "gpuProcessedFrames": 1773,
+    "gpuReadbackBytes": 1823707800,
+    "gpuRgbMeanError_17.9": 1.1165480751687649,
+    "gpuRgbMeanError_18": 1.1206355287964482,
+    "gpuRgbMeanError_55": 1.0852727604451742,
+    "gpuSurfaceFrames": 1773,
+    "gpuTransformMeanError": 0.4543477467615399,
+    "guiTimerMaxMs": 75.0354,
+    "guiTimerP95Ms": 68.5357,
+    "heartbeatIntervalMs": 50,
+    "maxAudioClockDriftSec": 0.010533333333334838,
+    "maxFrameAgeSec": 0.06539166666666674,
+    "measuredPlaybackSeconds": 58.005,
+    "mediaInnerBorderPixelMismatches": 0,
+    "mediaListFrameWidth": 4,
+    "paintedFps": 29.9974140160331,
+    "passed": true,
+    "pausedSeekPlayheadX": 136,
+    "presentedFps": 29.9974140160331,
+    "source": "E:/1004(1).mp4",
+    "steadyUnderruns": 0
+}

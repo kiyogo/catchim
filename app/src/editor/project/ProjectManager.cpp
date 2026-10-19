@@ -41,22 +41,30 @@ void ProjectManager::sortProjects(
     SortDirection direction
 ) {
     auto comparator = [key, direction](const ProjectMetadata& a, const ProjectMetadata& b) -> bool {
-        bool less = false;
-        switch (key) {
-            case ProjectSortKey::UpdatedAt:
-                less = a.updatedAt < b.updatedAt;
-                break;
-            case ProjectSortKey::CreatedAt:
-                less = a.createdAt < b.createdAt;
-                break;
-            case ProjectSortKey::Name:
-                less = a.name < b.name;
-                break;
-            case ProjectSortKey::Duration:
-                less = a.duration < b.duration;
-                break;
+        if (direction == SortDirection::Ascending) {
+            switch (key) {
+                case ProjectSortKey::UpdatedAt:
+                    return a.updatedAt < b.updatedAt;
+                case ProjectSortKey::CreatedAt:
+                    return a.createdAt < b.createdAt;
+                case ProjectSortKey::Name:
+                    return a.name < b.name;
+                case ProjectSortKey::Duration:
+                    return a.duration < b.duration;
+            }
+        } else {
+            switch (key) {
+                case ProjectSortKey::UpdatedAt:
+                    return a.updatedAt > b.updatedAt;
+                case ProjectSortKey::CreatedAt:
+                    return a.createdAt > b.createdAt;
+                case ProjectSortKey::Name:
+                    return a.name > b.name;
+                case ProjectSortKey::Duration:
+                    return a.duration > b.duration;
+            }
         }
-        return (direction == SortDirection::Ascending) ? less : !less;
+        return false;
     };
 
     std::sort(list.begin(), list.end(), comparator);

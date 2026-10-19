@@ -186,7 +186,10 @@ function ExportDialog({
 	};
 
 	return (
-		<DialogContent className="bg-background flex max-w-[26rem] flex-col overflow-hidden p-0">
+		<DialogContent
+			className="bg-background flex max-w-[26rem] flex-col overflow-hidden p-0"
+			closeClassName="top-3.5 right-3.5"
+		>
 			{exportResult && !exportResult.success ? (
 				<ExportError
 					error={exportResult.error || t("export.errorFallback")}

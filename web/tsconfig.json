@@ -2,6 +2,7 @@
 	"compilerOptions": {
 		"target": "ES2017",
 		"lib": ["dom", "dom.iterable", "esnext"],
+		"types": ["@webgpu/types"],
 		"allowJs": true,
 		"skipLibCheck": true,
 		"strict": true,
@@ -21,6 +22,7 @@
 		"paths": {
 			"@/*": ["./src/*"],
 			"opencut-wasm": ["./src/native/opencut-wasm-compat.ts"],
+			"bun:test": ["./src/test-shims/bun-test.ts"],
 			"content-collections": ["./.content-collections/generated"]
 		},
 		"forceConsistentCasingInFileNames": true

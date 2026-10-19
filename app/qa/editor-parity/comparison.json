@@ -1,0 +1,26 @@
+{
+  "reference": "qa\\editor-parity\\reference.png",
+  "candidate": "qa\\editor-parity\\editor-1912x938.png",
+  "size": [
+    1912,
+    938
+  ],
+  "mean_absolute_channel_error_0_255": [
+    1.2314938309052466,
+    1.1619359493625714,
+    1.1381438964769697
+  ],
+  "reference_canvas": [
+    633,
+    63,
+    642,
+    360
+  ],
+  "candidate_canvas": [
+    633,
+    63,
+    642,
+    360
+  ],
+  "limits": "Includes font rasterization, tooltip and dev badge differences. Does not test behavior or other screens."
+}

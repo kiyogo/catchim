@@ -80,7 +80,7 @@ export function TransformHandles({
 
 	const onPointerMove = (event: React.PointerEvent) =>
 		handlePointerMove({ event });
-	const onPointerUp = () => handlePointerUp();
+	const onPointerUp = (event: React.PointerEvent) => handlePointerUp(event);
 
 	return (
 		<div

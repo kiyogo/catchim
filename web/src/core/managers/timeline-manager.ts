@@ -753,10 +753,11 @@ export class TimelineManager {
 			before: committedTracks,
 			after: afterTracks,
 		});
-		this.editor.command.push({ command });
 		this.previewOverlay.clear();
 		this.previewTracks = null;
 		this.updateTracks(afterTracks);
+		// push() records an already-applied edit, including its C++ snapshot.
+		this.editor.command.push({ command });
 	}
 
 	discardPreview(): void {

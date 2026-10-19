@@ -1,0 +1,38 @@
+[
+  {
+    "level": "log",
+    "message": "WASM_PLAYBACK started by the Play button\n",
+    "timestamp": "2026-10-19T09:30:15.765Z",
+    "url": "http://playback.localhost:8766/catchim_wasm_playback.js"
+  },
+  {
+    "level": "log",
+    "message": "WASM_PLAYBACK PASS seconds 6.03142 frames 122 decoded 117 heartbeats 133\n",
+    "timestamp": "2026-10-19T09:30:26.275Z",
+    "url": "http://playback.localhost:8766/catchim_wasm_playback.js"
+  },
+  {
+    "level": "log",
+    "message": "WASM_RENDER 8.3999 size 480 270\n",
+    "timestamp": "2026-10-19T09:30:26.276Z",
+    "url": "http://playback.localhost:8766/catchim_wasm_playback.js"
+  },
+  {
+    "level": "log",
+    "message": "WASM_PAUSE PASS\n",
+    "timestamp": "2026-10-19T09:30:26.789Z",
+    "url": "http://playback.localhost:8766/catchim_wasm_playback.js"
+  },
+  {
+    "level": "log",
+    "message": "WASM_SEEK PASS\n",
+    "timestamp": "2026-10-19T09:30:28.303Z",
+    "url": "http://playback.localhost:8766/catchim_wasm_playback.js"
+  },
+  {
+    "level": "log",
+    "message": "WASM_RESUME PASS seconds 21.9268 frames 77\n",
+    "timestamp": "2026-10-19T09:30:32.331Z",
+    "url": "http://playback.localhost:8766/catchim_wasm_playback.js"
+  }
+]

@@ -39,6 +39,7 @@ void PlaybackController::stop() {
 void PlaybackController::seek(core::TimelineTime time) {
     core::TimelineTime clamped = time.clamp(core::TimelineTime(0), std::max(duration_, core::TimelineTime(0)));
     clock_.seek(clamped);
+    if(onSeek_)onSeek_(clamped);
     if (onTimeChanged_) {
         onTimeChanged_(clamped);
     }

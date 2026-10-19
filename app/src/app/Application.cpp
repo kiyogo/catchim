@@ -10,6 +10,9 @@
 #include <QApplication>
 #include "ui/MainWindow.h"
 #include "ui/theme/Theme.h"
+#if defined(HAVE_QT6_WEBENGINE)
+#include "window/WebMainWindow.h"
+#endif
 #endif
 
 namespace catchim::app {
@@ -127,13 +130,40 @@ int Application::run() {
     // Apply theme & palette from configuration
     ui::Theme::instance().setTheme(config_.theme == "light" ? ui::ThemeMode::Light : ui::ThemeMode::Dark);
 
+    bool useWebEngine = false;
+    for (int i = 1; i < argc_; ++i) {
+        std::string_view a = argv_[i];
+        if (a == "--web-ui" || a == "--webengine" || a == "--web") {
+            useWebEngine = true;
+            break;
+        }
+    }
+
+#if defined(HAVE_QT6_WEBENGINE)
+    if (useWebEngine) {
+        LOG_INFO("Launching Catchim Desktop with Qt WebEngine Host...");
+        window::WebMainWindow webWindow;
+        webWindow.resize(config_.windowWidth, config_.windowHeight);
+        if (config_.maximized) {
+            webWindow.showMaximized();
+        } else {
+            webWindow.show();
+        }
+        return qtApp.exec();
+    }
+#endif
+
     ui::MainWindow mainWindow(*editorEngine_, *mediaLibrary_, *renderEngine_);
     mainWindow.resize(config_.windowWidth, config_.windowHeight);
+#if defined(__EMSCRIPTEN__)
+    mainWindow.showFullScreen();
+#else
     if (config_.maximized) {
         mainWindow.showMaximized();
     } else {
         mainWindow.show();
     }
+#endif
 
     return qtApp.exec();
 #else

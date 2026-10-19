@@ -2,6 +2,16 @@
 #include <algorithm>
 
 namespace catchim::editor {
+namespace {
+std::vector<Scene> historyScenes(const std::vector<Scene>& scenes) {
+    std::vector<Scene> result;result.reserve(scenes.size());
+    for(const auto& scene:scenes)result.push_back(scene.shareTimelineForHistory());
+    return result;
+}
+void restoreHistoryScenes(Project& project,const std::vector<Scene>& scenes) {
+    project.scenes()=historyScenes(scenes);
+}
+}
 
 namespace SceneUtils {
 
@@ -62,15 +72,14 @@ CreateSceneCommand::CreateSceneCommand(
 }
 
 bool CreateSceneCommand::execute() {
-    savedScenes_ = project_.scenes();
+    savedScenes_ = historyScenes(project_.scenes());
     savedActiveSceneId_ = project_.currentSceneId();
 
     if (createdSceneId_.isEmpty()) {
         createdSceneId_ = core::SceneId::generate();
     }
-    Scene newScene(createdSceneId_, sceneName_, isMain_);
-
-    project_.scenes().push_back(std::move(newScene));
+    if(!createdScene_)createdScene_.emplace(createdSceneId_,sceneName_,isMain_);
+    project_.scenes().push_back(createdScene_->shareTimelineForHistory());
     project_.setCurrentSceneId(createdSceneId_);
     project_.setDirty(true);
     executed_ = true;
@@ -82,7 +91,7 @@ bool CreateSceneCommand::undo() {
         return false;
     }
 
-    project_.scenes() = savedScenes_;
+    restoreHistoryScenes(project_,savedScenes_);
     project_.setCurrentSceneId(savedActiveSceneId_);
     project_.setDirty(true);
     return true;
@@ -111,7 +120,7 @@ bool DeleteSceneCommand::execute() {
         return false;
     }
 
-    savedScenes_ = project_.scenes();
+    savedScenes_ = historyScenes(project_.scenes());
     savedActiveSceneId_ = project_.currentSceneId();
 
     std::vector<Scene> remaining;
@@ -145,7 +154,7 @@ bool DeleteSceneCommand::undo() {
         return false;
     }
 
-    project_.scenes() = savedScenes_;
+    restoreHistoryScenes(project_,savedScenes_);
     project_.setCurrentSceneId(savedActiveSceneId_);
     project_.setDirty(true);
     return true;
@@ -215,7 +224,7 @@ bool DuplicateSceneCommand::execute() {
         return false;
     }
 
-    savedScenes_ = project_.scenes();
+    savedScenes_ = historyScenes(project_.scenes());
     savedActiveSceneId_ = project_.currentSceneId();
 
     if (duplicatedSceneId_.isEmpty()) {
@@ -223,10 +232,11 @@ bool DuplicateSceneCommand::execute() {
     }
     std::string name = customName_.value_or(src->name() + " (Copy)");
 
-    Scene dup(duplicatedSceneId_, std::move(name), false);
-    dup.timeline() = src->timeline();
-
-    project_.scenes().push_back(std::move(dup));
+    if(!duplicatedScene_) {
+        duplicatedScene_.emplace(duplicatedSceneId_,std::move(name),false);
+        duplicatedScene_->timeline()=src->timeline();
+    }
+    project_.scenes().push_back(duplicatedScene_->shareTimelineForHistory());
     project_.setCurrentSceneId(duplicatedSceneId_);
     project_.setDirty(true);
     executed_ = true;
@@ -238,7 +248,7 @@ bool DuplicateSceneCommand::undo() {
         return false;
     }
 
-    project_.scenes() = savedScenes_;
+    restoreHistoryScenes(project_,savedScenes_);
     project_.setCurrentSceneId(savedActiveSceneId_);
     project_.setDirty(true);
     return true;

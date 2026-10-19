@@ -28,7 +28,7 @@ bool AudioSeparationEngine::canExtractSourceAudio(
     }
     if (!mediaAsset) {
         // If mediaAsset is not provided, check clip's duration > 0
-        return clip.duration() > core::TimelineTime(0);
+        return clip.getParam<bool>("hasAudio",true)&&clip.duration() > core::TimelineTime(0);
     }
     return mediaAsset->hasAudio() && clip.duration() > core::TimelineTime(0);
 }
@@ -88,6 +88,9 @@ Clip AudioSeparationEngine::buildSeparatedAudioClip(const Clip& sourceClip) {
     bool muted = sourceClip.getParam<bool>("muted", false);
     audioClip.setParam<double>("volume", vol);
     audioClip.setParam<bool>("muted", muted);
+    audioClip.setMuted(sourceClip.isMuted()||muted);
+    for(const char* key:{"audio.volumeUnit","speed","reversed","audio.fadeIn","audio.fadeOut"})
+        if(sourceClip.hasParam(key))audioClip.params()[key]=sourceClip.params()[key];
 
     if (sourceClip.params().contains("retimeRate")) {
         audioClip.setParam<double>("retimeRate", sourceClip.getParam<double>("retimeRate", 1.0));

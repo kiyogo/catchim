@@ -1,0 +1,43 @@
+# MIGRATION CHECKLIST — CATCHIM NATIVE C++
+Dự án: Chuyển đổi Web OpenCut sang Native C++ Desktop (Catchim)
+
+- [x] **Phase A — Khảo sát & Phân tích (Discovery)**: Quét toàn bộ source Web `E:\DATA\source\catchim\web`, phân tích route, component, styles, logic.
+- [x] **Phase B — Định hình Thiết kế Visual (Visual Baseline)**: Xác định bảng màu Tailwind zinc-950/zinc-900/sky-400, kích thước panel, tỉ lệ thước đo.
+- [x] **Phase C — Nền tảng Kỹ thuật C++ (C++ Foundation)**: Hệ thống CMake, MSVC2022, Ninja, Qt6.8.0, nlohmann_json, Qt Widgets, OpenGL.
+- [x] **Phase D — Tái tạo Toàn diện Giao diện Người dùng (UI Recreation)**:
+  - [x] `MainWindow`: Card panels floating với `editorBody` padding 10px, 4px spacing, viền 1px solid #27272a bo góc 8px.
+  - [x] `EditorHeader`: Logo menu với Tất cả dự án, Tạo mới, Mở tệp, Lưu tệp, Phím tắt; inline project name edit, Undo/Redo, Export gradient button, Sun/Moon theme toggle.
+  - [x] `ProjectsHubDialog`: Tương đương 100% trang `/projects` với chế độ Lưới (Grid) và Danh sách (List), tìm kiếm thời gian thực, sắp xếp (Sửa đổi, Tạo, Tên, Thời lượng), đổi hướng tăng/giảm, nhân bản, đổi tên, xem thông tin và xóa dự án.
+  - [x] `AssetsPanel`: 44px vertical tabbar với 9 tabs, active indicator bar, dashed drop zone import card.
+  - [x] `PreviewPanel`: OpenGL canvas, 90%/80% safe zones, center crosshair, player toolbar, timecode.
+  - [x] `PropertiesPanel`: Transform, Speed, Audio, Text, Effects. Canvas aspect ratios (16:9, 9:16, 1:1, 4:5, 21:9), FPS, background color.
+  - [x] `TimelinePanel`: Synchronized Ruler & Tracks, Playhead cursor aligned với 112px track labels, Toolbar với Q/S/W split, zoom slider, ripple, snap, marker.
+  - [x] `ExportDialog`: Định dạng MP4/WebM, chất lượng, độ phân giải presets, tiến trình render.
+  - [x] `ShortcutsDialog`: Bảng tra cứu phím tắt đầy đủ cho Playback, Timeline, Project và Preview.
+- [x] **Phase E — Chuyển đổi Logic Lõi (Logic Porting)**:
+  - [x] Core Timeline time math & rational frame rates (64-bit microsecond precision).
+  - [x] Quản lý clip đa dạng (Video, Audio, Text, Graphic, Effect).
+  - [x] Tách âm thanh & biểu đồ sóng âm thanh trực quan RMS.
+  - [x] Hít nam châm thông minh & chế độ Ripple editing.
+  - [x] Kết xuất đồ họa đa tầng & OpenGL preview hardware acceleration.
+  - [x] Hệ thống lưu trữ nguyên tử Atomic Project Storage chống hỏng file.
+- [x] **Phase F — Kiểm thử & Xác thực (Verification)**:
+  - [x] Build thành công với Ninja & MSVC 2022 (Exit code 0).
+  - [x] Vượt qua toàn bộ 241/241 test suite trong `catchim_tests.exe`.
+  - [x] Chạy thử `catchim_app.exe` thành công trên Windows 64-bit (PID hợp lệ, khởi động tức thì <350ms).
+- [x] **Phase G — Hồ sơ Tài liệu Chuyển đổi Đầy đủ (Migration Portfolio)**:
+  - [x] `source_inventory.md`
+  - [x] `route_mapping.md`
+  - [x] `component_mapping.md`
+  - [x] `dependency_audit.md`
+  - [x] `architecture_mapping.md`
+  - [x] `function_mapping.md`
+  - [x] `state_mapping.md`
+  - [x] `api_mapping.md`
+  - [x] `asset_mapping.md`
+  - [x] `visual_specification.md`
+  - [x] `behavior_specification.md`
+  - [x] `known_differences.md`
+  - [x] `parity_report.md`
+  - [x] `migration_checklist.md`
+  - [x] `progress.md`

@@ -1,0 +1,253 @@
+{
+    "checks": [
+        {
+            "name": "undo-delete-scene",
+            "passed": true
+        },
+        {
+            "name": "undo-edit-in-restored-scene",
+            "passed": true
+        },
+        {
+            "name": "undo-create-preserves-main-timeline",
+            "passed": true
+        },
+        {
+            "name": "undo-original-after-scene-operations",
+            "passed": true
+        },
+        {
+            "name": "redo-original",
+            "passed": true
+        },
+        {
+            "name": "redo-create",
+            "passed": true
+        },
+        {
+            "name": "redo-edit-in-created-scene",
+            "passed": true
+        },
+        {
+            "name": "redo-delete-scene",
+            "passed": true
+        },
+        {
+            "name": "restore-again",
+            "passed": true
+        },
+        {
+            "name": "export-project-copy-independent",
+            "passed": true
+        },
+        {
+            "name": "duplicate-scene-timeline-independent",
+            "passed": true
+        },
+        {
+            "name": "main-scene-protected",
+            "passed": true
+        },
+        {
+            "name": "undo-insert",
+            "passed": true
+        },
+        {
+            "name": "redo-insert-retains-content",
+            "passed": true
+        },
+        {
+            "name": "inspector-rail-41px",
+            "passed": true
+        },
+        {
+            "name": "text-edit-committed",
+            "passed": true
+        },
+        {
+            "name": "text-edit-undo",
+            "passed": true
+        },
+        {
+            "name": "inspector-updates-after-undo",
+            "passed": true
+        },
+        {
+            "name": "font-size-committed",
+            "passed": true
+        },
+        {
+            "name": "inspector-dark-theme-field",
+            "passed": true
+        },
+        {
+            "name": "text-transform-tab",
+            "passed": true
+        },
+        {
+            "name": "inspector-no-horizontal-overflow",
+            "passed": true
+        },
+        {
+            "name": "inspector-no-horizontal-overflow",
+            "passed": true
+        },
+        {
+            "name": "scenes-drawer-native-384px",
+            "passed": true
+        },
+        {
+            "name": "scene-select-mode",
+            "passed": true
+        },
+        {
+            "name": "feedback-card-384px",
+            "passed": true
+        },
+        {
+            "name": "feedback-test-server",
+            "passed": true
+        },
+        {
+            "name": "feedback-native-post-and-ack",
+            "passed": true
+        },
+        {
+            "name": "new-layer-adds-track",
+            "passed": true
+        },
+        {
+            "name": "new-layer-undo-removes-track",
+            "passed": true
+        },
+        {
+            "name": "new-layer-redo-retains-clip",
+            "passed": true
+        },
+        {
+            "name": "new-layer-redo-stable-track-id",
+            "passed": true
+        },
+        {
+            "name": "ffmpeg-available",
+            "passed": true
+        },
+        {
+            "name": "fixture-generated",
+            "passed": true
+        },
+        {
+            "name": "real-media-probe",
+            "passed": true
+        },
+        {
+            "name": "native-decoder-matches-reference",
+            "passed": true
+        },
+        {
+            "name": "native-decoder-small-backward-seek",
+            "passed": true
+        },
+        {
+            "name": "one-decibel-not-linear-unity",
+            "passed": true
+        },
+        {
+            "name": "mute-affects-audio",
+            "passed": true
+        },
+        {
+            "name": "undo-mute",
+            "passed": true
+        },
+        {
+            "name": "drag-is-single-undo-step",
+            "passed": true
+        },
+        {
+            "name": "drag-undo-restores-position",
+            "passed": true
+        },
+        {
+            "name": "context-copy-real-clipboard",
+            "passed": true
+        },
+        {
+            "name": "context-mute",
+            "passed": true
+        },
+        {
+            "name": "context-hide",
+            "passed": true
+        },
+        {
+            "name": "hidden-clip-not-rendered",
+            "passed": true
+        },
+        {
+            "name": "mixed-export-file",
+            "passed": true
+        },
+        {
+            "name": "timeline-export-silence-before-clip",
+            "passed": true
+        },
+        {
+            "name": "timeline-export-audible-at-clip",
+            "passed": true
+        },
+        {
+            "name": "timeline-export-silence-after-clip",
+            "passed": true
+        },
+        {
+            "name": "export-duration-preserved",
+            "passed": true
+        },
+        {
+            "name": "export-resolution-correct",
+            "passed": true
+        },
+        {
+            "name": "export-media-fills-scaled-canvas",
+            "passed": true
+        },
+        {
+            "name": "muted-export-file",
+            "passed": true
+        },
+        {
+            "name": "muted-export-silent",
+            "passed": true
+        },
+        {
+            "name": "muted-stays-silent-mid-clip",
+            "passed": true
+        },
+        {
+            "name": "timeline-export-silence-after-clip",
+            "passed": true
+        },
+        {
+            "name": "export-duration-preserved",
+            "passed": true
+        },
+        {
+            "name": "export-resolution-correct",
+            "passed": true
+        },
+        {
+            "name": "export-media-fills-scaled-canvas",
+            "passed": true
+        },
+        {
+            "name": "cancelled-export-never-reports-success",
+            "passed": true
+        },
+        {
+            "name": "missing-media-never-beeps",
+            "passed": true
+        }
+    ],
+    "passed": true
+}

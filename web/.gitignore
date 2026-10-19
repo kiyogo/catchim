@@ -13,5 +13,7 @@ out/
 .turbo/
 .content-collections/
 .font-cache/
+dist-browser/
+public/wasm/catchim_browser_core.*
 *.tsbuildinfo
 next-env.d.ts

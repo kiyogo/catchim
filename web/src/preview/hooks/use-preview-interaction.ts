@@ -5,6 +5,7 @@ import { useShiftKey } from "@/hooks/use-shift-key";
 import { usePreviewViewport } from "@/preview/components/preview-viewport";
 import type { SnapLine } from "@/preview/preview-snap";
 import { registerCanceller } from "@/editor/cancel-interaction";
+import { LatestFrameTask } from "@/utils/latest-frame-task";
 import {
 	PreviewInteractionController,
 	type PreviewInteractionDeps,
@@ -64,6 +65,7 @@ export function usePreviewInteraction({
 	const [controller] = useState(
 		() => new PreviewInteractionController({ depsRef }),
 	);
+	const [pointerMove] = useState(() => new LatestFrameTask(controller.onPointerMove));
 
 	const [, rerender] = useReducer((n: number) => n + 1, 0);
 	useEffect(
@@ -73,15 +75,18 @@ export function usePreviewInteraction({
 
 	useEffect(() => {
 		if (!controller.isDragging) return;
-		return registerCanceller({ fn: () => controller.cancel() });
+		return registerCanceller({ fn: () => { pointerMove.cancel(); controller.cancel(); } });
 	}, [controller.isDragging, controller]);
 
-	useEffect(() => () => controller.destroy(), [controller]);
+	useEffect(() => () => { pointerMove.cancel(); controller.destroy(); }, [controller, pointerMove]);
 
 	return {
 		onPointerDown: controller.onPointerDown,
-		onPointerMove: controller.onPointerMove,
-		onPointerUp: controller.onPointerUp,
+		onPointerMove: pointerMove.schedule,
+		onPointerUp: (event: Parameters<typeof controller.onPointerUp>[0]) => {
+			if (event.type === "pointercancel") pointerMove.cancel(); else pointerMove.flush();
+			controller.onPointerUp(event);
+		},
 		onDoubleClick: controller.onDoubleClick,
 		editingText: controller.editingText,
 		commitTextEdit: controller.commitTextEdit,

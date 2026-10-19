@@ -13,6 +13,9 @@ struct ElementPatch {
     core::TrackId trackId;
     core::ClipId clipId;
     nlohmann::json patchParams{nlohmann::json::object()};
+    std::optional<bool> muted;
+    std::optional<bool> hidden;
+    std::optional<std::string> name;
 
     ElementPatch() = default;
     ElementPatch(core::TrackId tid, core::ClipId cid, nlohmann::json patch)

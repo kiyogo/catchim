@@ -13,8 +13,7 @@
 #include "ui/panels/properties/PropertiesPanel.h"
 #include "ui/timeline/TimelinePanel.h"
 
-#include "audio/WindowsAudioPlayer.h"
-#include "audio/AudioPlaybackEngine.h"
+#include "audio/PlaybackAudioSession.h"
 
 namespace catchim::ui {
 
@@ -28,27 +27,33 @@ public:
         QWidget* parent = nullptr
     );
     ~MainWindow() override;
+    audio::PlaybackAudioSession::Statistics playbackAudioStatistics() const {return audioSession_.statistics();}
+    void setPlaybackOutputVolume(float volume){audioSession_.setVolume(volume);}
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void onAppTick();
     void onExportRequested();
     void onThemeToggleRequested();
+    void onOpenProject();
+    void onSaveProject();
+    void onOpenProjectsHub();
 
 private:
     void setupUi();
     void setupShortcuts();
     void setupEngineCallbacks();
+    void refreshPlaybackSnapshot();
 
     editor::EditorEngine& engine_;
     media::MediaLibrary& mediaLibrary_;
     render::RenderEngine& renderEngine_;
 
-    audio::WindowsAudioPlayer audioPlayer_;
-    audio::AudioPlaybackEngine audioPlaybackEngine_;
-    core::TimelineTime lastAudioTime_{core::TimelineTime(0)};
+    audio::PlaybackAudioSession audioSession_;
+    std::shared_ptr<const media::PlaybackSnapshot> playbackSnapshot_;
 
     EditorHeader* header_{nullptr};
     QSplitter* verticalSplitter_{nullptr};

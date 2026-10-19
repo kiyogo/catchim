@@ -50,6 +50,7 @@ private:
     std::string sceneName_;
     bool isMain_{false};
     core::SceneId createdSceneId_;
+    std::optional<Scene> createdScene_;
     std::vector<Scene> savedScenes_;
     core::SceneId savedActiveSceneId_;
     bool executed_{false};
@@ -127,6 +128,7 @@ private:
     core::SceneId sceneId_;
     std::optional<std::string> customName_;
     core::SceneId duplicatedSceneId_;
+    std::optional<Scene> duplicatedScene_;
     std::vector<Scene> savedScenes_;
     core::SceneId savedActiveSceneId_;
     bool executed_{false};

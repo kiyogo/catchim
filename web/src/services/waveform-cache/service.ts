@@ -3,6 +3,7 @@
 import { createAudioContext } from "@/media/audio";
 import {
 	buildSourceWaveformSummary,
+	buildSourceWaveformSummaryAsync,
 	type SourceWaveformSummary,
 } from "@/media/waveform-summary";
 
@@ -56,7 +57,7 @@ export class WaveformCache {
 		audioUrl,
 	}: GetSourceWaveformSummaryArgs): Promise<SourceWaveformSummary> {
 		if (audioBuffer) {
-			return buildSourceWaveformSummary({ sourceKey, buffer: audioBuffer });
+			return buildSourceWaveformSummaryAsync({ sourceKey, buffer: audioBuffer });
 		}
 
 		let arrayBuffer: ArrayBuffer | null = null;
@@ -77,7 +78,7 @@ export class WaveformCache {
 		const audioContext = createAudioContext();
 		try {
 			const buffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
-			return buildSourceWaveformSummary({ sourceKey, buffer });
+			return await buildSourceWaveformSummaryAsync({ sourceKey, buffer });
 		} finally {
 			void audioContext.close();
 		}

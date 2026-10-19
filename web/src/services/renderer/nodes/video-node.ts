@@ -8,6 +8,7 @@ export interface VideoNodeParams extends VisualNodeParams {
 	url: string;
 	file: File;
 	mediaId: string;
+	previewKey?: string;
 }
 
 export class VideoNode extends VisualNode<

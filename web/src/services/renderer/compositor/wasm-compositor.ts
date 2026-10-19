@@ -37,6 +37,7 @@ type ExternalCacheEntry = {
 	source: CanvasImageSource;
 	width: number;
 	height: number;
+	version?: number | string;
 };
 
 class WasmCompositor {
@@ -63,10 +64,7 @@ class WasmCompositor {
 	}
 
 	getCanvas(): HTMLCanvasElement {
-		if (!this.canvas) {
-			throw new Error("Compositor is not initialized");
-		}
-		return this.canvas;
+		return getCompositorCanvas();
 	}
 
 	syncTextures(textures: TextureUploadDescriptor[]) {
@@ -102,7 +100,8 @@ class WasmCompositor {
 			previous?.kind === "external" &&
 			previous.source === texture.source &&
 			previous.width === texture.width &&
-			previous.height === texture.height
+			previous.height === texture.height &&
+			previous.version === texture.version
 		) {
 			incrementCounter({ name: "textureCacheHit" });
 			return;
@@ -113,22 +112,20 @@ class WasmCompositor {
 			name: "textureUploadPixels",
 			by: texture.width * texture.height,
 		});
+		// Direct hardware upload into WebGPU texture - zero CPU copies or canvas wrapper allocations
 		uploadTexture({
 			id: texture.id,
-			source: ensureOffscreenCanvas({
-				source: texture.source,
-				width: texture.width,
-				height: texture.height,
-				label: `texture upload ${texture.id}`,
-			}),
+			source: texture.source,
 			width: texture.width,
 			height: texture.height,
+			version: texture.version,
 		});
 		this.cache.set(texture.id, {
 			kind: "external",
 			source: texture.source,
 			width: texture.width,
 			height: texture.height,
+			version: texture.version,
 		});
 	}
 
@@ -171,6 +168,7 @@ class WasmCompositor {
 			source: canvas,
 			width: texture.width,
 			height: texture.height,
+			version: texture.contentHash,
 		});
 		this.cache.set(texture.id, {
 			kind: "rendered",

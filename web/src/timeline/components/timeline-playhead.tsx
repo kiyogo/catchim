@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import { useContainerSize } from "@/hooks/use-container-size";
 import {
 	getCenteredLineLeft,
@@ -33,6 +33,8 @@ interface TimelinePlayheadProps {
 	isSnappingToPlayhead?: boolean;
 }
 
+const NEEDLE_CANVAS_WIDTH = 24;
+
 export function TimelinePlayhead({
 	zoomLevel,
 	hasHorizontalScrollbar,
@@ -48,6 +50,7 @@ export function TimelinePlayhead({
 	const duration = editor.timeline.getTotalDuration();
 	const internalPlayheadRef = useRef<HTMLDivElement>(null);
 	const playheadRef = externalPlayheadRef || internalPlayheadRef;
+	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
 	const { handlePlayheadMouseDown } = useTimelinePlayhead({
 		zoomLevel,
@@ -79,6 +82,70 @@ export function TimelinePlayhead({
 	const leftPosition =
 		getCenteredLineLeft({ centerPixel: centerPosition }) - scrollLeft;
 
+	// Render Playhead on High-DPI Canvas
+	const drawPlayhead = useCallback(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+
+		const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+		const width = NEEDLE_CANVAS_WIDTH;
+		const height = Math.max(20, totalHeight);
+
+		const pixelW = Math.ceil(width * dpr);
+		const pixelH = Math.ceil(height * dpr);
+
+		if (canvas.width !== pixelW || canvas.height !== pixelH) {
+			canvas.width = pixelW;
+			canvas.height = pixelH;
+			canvas.style.width = `${width}px`;
+			canvas.style.height = `${height}px`;
+		}
+
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		ctx.clearRect(0, 0, width, height);
+
+		const centerX = width / 2;
+
+		// 1. Playhead vertical line (#0ea5e9 with subtle outer glow)
+		ctx.save();
+		ctx.shadowColor = "rgba(14, 165, 233, 0.45)";
+		ctx.shadowBlur = 4;
+		ctx.strokeStyle = "#0ea5e9";
+		ctx.lineWidth = 1.5;
+		ctx.beginPath();
+		ctx.moveTo(centerX, 14);
+		ctx.lineTo(centerX, height);
+		ctx.stroke();
+		ctx.restore();
+
+		// 2. Playhead circular needle handle at the top
+		const needleY = 8;
+		const needleRadius = 5.5;
+
+		ctx.save();
+		ctx.shadowColor = "rgba(14, 165, 233, 0.6)";
+		ctx.shadowBlur = 6;
+
+		// Needle fill
+		ctx.fillStyle = "#0ea5e9";
+		ctx.beginPath();
+		ctx.arc(centerX, needleY, needleRadius, 0, Math.PI * 2);
+		ctx.fill();
+
+		// Needle ring
+		ctx.strokeStyle = isSnappingToPlayhead ? "#ffffff" : "#38bdf8";
+		ctx.lineWidth = 2.0;
+		ctx.stroke();
+		ctx.restore();
+	}, [totalHeight, isSnappingToPlayhead]);
+
+	useEffect(() => {
+		drawPlayhead();
+	}, [drawPlayhead]);
+
 	const handlePlayheadKeyDown = (
 		event: React.KeyboardEvent<HTMLDivElement>,
 	) => {
@@ -107,6 +174,7 @@ export function TimelinePlayhead({
 	return (
 		<div
 			ref={playheadRef}
+			data-timeline-playhead="true"
 			role="slider"
 			aria-label={t("timeline.timelinePlayhead")}
 			aria-valuemin={0}
@@ -115,20 +183,26 @@ export function TimelinePlayhead({
 			tabIndex={0}
 			className="pointer-events-none absolute"
 			style={{
-				left: `${leftPosition}px`,
+				left: 0,
+				transform: `translate3d(${leftPosition - NEEDLE_CANVAS_WIDTH / 2 + TIMELINE_INDICATOR_LINE_WIDTH_PX / 2}px, 0, 0)`,
+				willChange: "transform",
 				top: 0,
 				height: `${totalHeight}px`,
-				width: `${TIMELINE_INDICATOR_LINE_WIDTH_PX}px`,
+				width: `${NEEDLE_CANVAS_WIDTH}px`,
 				zIndex: TIMELINE_LAYERS.playhead,
 			}}
 			onKeyDown={handlePlayheadKeyDown}
 		>
-			<div className="bg-primary pointer-events-none absolute left-0 h-full w-0.5" />
-
+			<canvas
+				ref={canvasRef}
+				data-engine="canvas-playhead"
+				className="pointer-events-none block size-full"
+			/>
+			{/* Interactive transparent grip surface over the circular handle */}
 			<button
 				type="button"
 				aria-label={t("timeline.dragPlayhead")}
-				className={`pointer-events-auto absolute top-1 left-1/2 size-3 -translate-x-1/2 transform cursor-col-resize rounded-full border-2 shadow-xs ${isSnappingToPlayhead ? "bg-primary border-primary" : "bg-primary border-primary/50"}`}
+				className="pointer-events-auto absolute top-0 left-1/2 size-5 -translate-x-1/2 cursor-col-resize appearance-none border-0 bg-transparent p-0"
 				onMouseDown={handlePlayheadMouseDown}
 			/>
 		</div>

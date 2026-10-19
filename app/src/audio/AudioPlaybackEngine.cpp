@@ -25,11 +25,13 @@ double AudioPlaybackEngine::resolveEffectiveAudioGain(
     bool trackMuted,
     core::TimelineTime /*localTime*/
 ) {
-    if (trackMuted || clip.isMuted()) {
+    if (trackMuted || clip.isMuted() || clip.getParam<bool>("muted", false) ||
+        (clip.type()==editor::ClipType::Video&&!clip.getParam<bool>("isSourceAudioEnabled",true))) {
         return 0.0;
     }
 
     double vol = clip.getParam<double>("volume", 0.0);
+    if (clip.getParam<std::string>("audio.volumeUnit", "") == "db") return dBToLinear(vol);
     // 0.0 represents 0 dB in test assertion (unity gain = 1.0)
     if (vol == 0.0) {
         return 1.0;
@@ -113,9 +115,10 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
             bool renderedRealAudio = false;
             if (mediaLibrary && !clip.mediaId().isEmpty()) {
                 auto asset = mediaLibrary->findAsset(clip.mediaId());
-                if (asset) {
-                    std::vector<float> pcm;
-                    if (media::NativeAudioDecoder::instance().getAudioSamples(asset->filePath(), pcm, sampleRate, 2) && !pcm.empty()) {
+                if (asset && asset->hasAudio()) {
+                    auto pcmBuf = media::NativeAudioDecoder::instance().getAudioBuffer(asset->filePath(), sampleRate, 2);
+                    if (pcmBuf && !pcmBuf->empty()) {
+                        const auto& pcm = *pcmBuf;
                         size_t totalSourceFrames = pcm.size() / 2;
 
                         for (size_t i = 0; i < overlapFrames && (frameOffsetInSlice + i) < numFrames; ++i) {
@@ -154,8 +157,9 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
                 }
             }
 
-            // Fallback for synthetic clips or when media file is not found (ensures 100% test pass)
-            if (!renderedRealAudio) {
+            // Only the no-library test overload synthesizes a tone. Missing/silent
+            // media in production preview and export must stay silent.
+            if (!renderedRealAudio && !mediaLibrary) {
                 for (size_t i = 0; i < overlapFrames && (frameOffsetInSlice + i) < numFrames; ++i) {
                     size_t frameIdx = frameOffsetInSlice + i;
                     double t = (overlapStart.toSeconds() + static_cast<double>(i) / sampleRate);

@@ -119,6 +119,15 @@ export class PlaybackManager {
 		return this.currentTime;
 	}
 
+	/** Smooth presentation clock; editing/seek positions remain frame-aligned. */
+	getDisplayTime(): MediaTime {
+		if (!this.isPlaying) return this.currentTime;
+		return this.clampTimeToTimeline(addMediaTime({
+			a: this.playbackStartTime,
+			b: mediaTimeFromSeconds({ seconds: (performance.now() - this.playbackStartWallTime) / 1000 }),
+		}));
+	}
+
 	getVolume(): number {
 		return this.volume;
 	}

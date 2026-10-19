@@ -1,0 +1,242 @@
+{
+    "checks": [
+        {
+            "name": "fixture-written",
+            "passed": true
+        },
+        {
+            "name": "fit-letterboxed-rendered",
+            "passed": true
+        },
+        {
+            "name": "fit-letterboxed-selection-matches-actual-pixels",
+            "passed": true
+        },
+        {
+            "name": "uses-source-not-80-percent-of-canvas",
+            "passed": true
+        },
+        {
+            "name": "blue-border-painted-on-real-four-edges",
+            "passed": true
+        },
+        {
+            "name": "small-nonuniform-no-minimum-box-rendered",
+            "passed": true
+        },
+        {
+            "name": "small-nonuniform-no-minimum-box-selection-matches-actual-pixels",
+            "passed": true
+        },
+        {
+            "name": "translated-rotated-rendered",
+            "passed": true
+        },
+        {
+            "name": "translated-rotated-selection-matches-actual-pixels",
+            "passed": true
+        },
+        {
+            "name": "negative-scale-rendered",
+            "passed": true
+        },
+        {
+            "name": "negative-scale-selection-matches-actual-pixels",
+            "passed": true
+        },
+        {
+            "name": "zoom-25-rendered",
+            "passed": true
+        },
+        {
+            "name": "zoom-25-selection-matches-actual-pixels",
+            "passed": true
+        },
+        {
+            "name": "zoom-100-rendered",
+            "passed": true
+        },
+        {
+            "name": "zoom-100-selection-matches-actual-pixels",
+            "passed": true
+        },
+        {
+            "name": "handle-0-correct-axis-and-direction",
+            "passed": true
+        },
+        {
+            "name": "handle-0-single-undo-record",
+            "passed": true
+        },
+        {
+            "name": "handle-0-undo-exact",
+            "passed": true
+        },
+        {
+            "name": "handle-0-redo",
+            "passed": true
+        },
+        {
+            "name": "handle-1-correct-axis-and-direction",
+            "passed": true
+        },
+        {
+            "name": "handle-1-single-undo-record",
+            "passed": true
+        },
+        {
+            "name": "handle-1-undo-exact",
+            "passed": true
+        },
+        {
+            "name": "handle-1-redo",
+            "passed": true
+        },
+        {
+            "name": "handle-2-correct-axis-and-direction",
+            "passed": true
+        },
+        {
+            "name": "handle-2-single-undo-record",
+            "passed": true
+        },
+        {
+            "name": "handle-2-undo-exact",
+            "passed": true
+        },
+        {
+            "name": "handle-2-redo",
+            "passed": true
+        },
+        {
+            "name": "handle-3-correct-axis-and-direction",
+            "passed": true
+        },
+        {
+            "name": "handle-3-single-undo-record",
+            "passed": true
+        },
+        {
+            "name": "handle-3-undo-exact",
+            "passed": true
+        },
+        {
+            "name": "handle-3-redo",
+            "passed": true
+        },
+        {
+            "name": "handle-4-correct-axis-and-direction",
+            "passed": true
+        },
+        {
+            "name": "handle-4-single-undo-record",
+            "passed": true
+        },
+        {
+            "name": "handle-4-undo-exact",
+            "passed": true
+        },
+        {
+            "name": "handle-4-redo",
+            "passed": true
+        },
+        {
+            "name": "handle-5-correct-axis-and-direction",
+            "passed": true
+        },
+        {
+            "name": "handle-5-single-undo-record",
+            "passed": true
+        },
+        {
+            "name": "handle-5-undo-exact",
+            "passed": true
+        },
+        {
+            "name": "handle-5-redo",
+            "passed": true
+        },
+        {
+            "name": "handle-6-correct-axis-and-direction",
+            "passed": true
+        },
+        {
+            "name": "handle-6-single-undo-record",
+            "passed": true
+        },
+        {
+            "name": "handle-6-undo-exact",
+            "passed": true
+        },
+        {
+            "name": "handle-6-redo",
+            "passed": true
+        },
+        {
+            "name": "handle-7-correct-axis-and-direction",
+            "passed": true
+        },
+        {
+            "name": "handle-7-single-undo-record",
+            "passed": true
+        },
+        {
+            "name": "handle-7-undo-exact",
+            "passed": true
+        },
+        {
+            "name": "handle-7-redo",
+            "passed": true
+        },
+        {
+            "name": "drag-in-previously-dead-outer-band",
+            "passed": true
+        },
+        {
+            "name": "rotation-handle-follows-pointer-angle",
+            "passed": true
+        },
+        {
+            "name": "outside-rotated-polygon-not-draggable",
+            "passed": true
+        },
+        {
+            "name": "pan-moves-selection-with-frame",
+            "passed": true
+        },
+        {
+            "name": "hidden-clip-has-no-selection",
+            "passed": true
+        },
+        {
+            "name": "hidden-track-has-no-selection",
+            "passed": true
+        },
+        {
+            "name": "deselected-has-no-selection",
+            "passed": true
+        },
+        {
+            "name": "user-video-probed",
+            "passed": true
+        },
+        {
+            "name": "actual-hevc-rendered",
+            "passed": true
+        },
+        {
+            "name": "actual-hevc-visible-aperture",
+            "passed": true
+        },
+        {
+            "name": "actual-hevc-box-agrees-with-visible-video-edges",
+            "passed": true
+        },
+        {
+            "name": "fit-keeps-bottom-handles-inside-viewport",
+            "passed": true
+        }
+    ],
+    "dpi": 1,
+    "passed": true
+}

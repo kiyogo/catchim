@@ -1,6 +1,10 @@
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime
+import argparse
 import os
+import sys
+import time
 
 
 # ============================================================
@@ -693,127 +697,397 @@ def count_code_lines(file: Path) -> int:
 
 
 # ============================================================
-# MAIN
+# TERMINAL UI
 # ============================================================
 
-def main():
+class Color:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
+    BRIGHT_RED = "\033[91m"
+    BRIGHT_GREEN = "\033[92m"
+    BRIGHT_YELLOW = "\033[93m"
+    BRIGHT_BLUE = "\033[94m"
+    BRIGHT_MAGENTA = "\033[95m"
+    BRIGHT_CYAN = "\033[96m"
 
-    root = Path.cwd().resolve()
 
-    stats = defaultdict(
-        lambda: {
-            "files": 0,
-            "lines": 0
-        }
+USE_COLOR = True
+
+
+def enable_ansi():
+    if os.name != "nt":
+        return
+
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+    except Exception:
+        pass
+
+
+def supports_unicode():
+    try:
+        "✓◆●○✖".encode(sys.stdout.encoding or "utf-8")
+        return True
+    except Exception:
+        return False
+
+
+UNICODE = supports_unicode()
+
+ICON = {
+    "scan": "◆" if UNICODE else "*",
+    "file": "●" if UNICODE else "+",
+    "empty": "○" if UNICODE else "-",
+    "error": "✖" if UNICODE else "X",
+    "done": "✓" if UNICODE else "OK",
+    "folder": "▣" if UNICODE else "#",
+    "info": "›" if UNICODE else ">",
+}
+
+
+LANGUAGE_NAMES = {
+    ".rs": "Rust",
+    ".py": "Python", ".pyw": "Python", ".pyi": "Python",
+    ".js": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript", ".jsx": "JavaScript",
+    ".ts": "TypeScript", ".mts": "TypeScript", ".cts": "TypeScript", ".tsx": "TypeScript",
+    ".c": "C", ".h": "C/C++ Header",
+    ".cc": "C++", ".cpp": "C++", ".cxx": "C++",
+    ".hh": "C++ Header", ".hpp": "C++ Header", ".hxx": "C++ Header", ".ipp": "C++", ".tpp": "C++",
+    ".java": "Java", ".kt": "Kotlin", ".kts": "Kotlin", ".scala": "Scala", ".groovy": "Groovy",
+    ".cs": "C#", ".csx": "C#", ".go": "Go",
+    ".php": "PHP", ".php3": "PHP", ".php4": "PHP", ".php5": "PHP", ".php7": "PHP", ".php8": "PHP", ".phtml": "PHP",
+    ".rb": "Ruby", ".rake": "Ruby", ".gemspec": "Ruby",
+    ".swift": "Swift", ".m": "Objective-C", ".mm": "Objective-C++",
+    ".dart": "Dart", ".lua": "Lua", ".pl": "Perl", ".pm": "Perl", ".r": "R", ".jl": "Julia",
+    ".hs": "Haskell", ".lhs": "Haskell", ".ex": "Elixir", ".exs": "Elixir", ".erl": "Erlang", ".hrl": "Erlang",
+    ".clj": "Clojure", ".cljs": "Clojure", ".cljc": "Clojure",
+    ".fs": "F#", ".fsi": "F#", ".fsx": "F#", ".vb": "Visual Basic",
+    ".pas": "Pascal", ".pp": "Pascal",
+    ".f": "Fortran", ".f77": "Fortran", ".f90": "Fortran", ".f95": "Fortran", ".f03": "Fortran", ".f08": "Fortran",
+    ".asm": "Assembly", ".s": "Assembly",
+    ".sh": "Shell", ".bash": "Shell", ".zsh": "Shell", ".fish": "Shell", ".csh": "Shell", ".ksh": "Shell",
+    ".ps1": "PowerShell", ".psm1": "PowerShell", ".psd1": "PowerShell", ".bat": "Batch", ".cmd": "Batch",
+    ".html": "HTML", ".htm": "HTML", ".xhtml": "HTML",
+    ".css": "CSS", ".scss": "SCSS", ".sass": "Sass", ".less": "Less",
+    ".sql": "SQL", ".sol": "Solidity", ".move": "Move",
+    ".v": "Verilog", ".vh": "Verilog", ".sv": "SystemVerilog", ".svh": "SystemVerilog", ".vhd": "VHDL", ".vhdl": "VHDL",
+    ".cu": "CUDA", ".cuh": "CUDA", ".cl": "OpenCL",
+    ".proto": "Protobuf", ".graphql": "GraphQL", ".gql": "GraphQL",
+    ".hlsl": "HLSL", ".fx": "HLSL", ".glsl": "GLSL", ".vert": "GLSL", ".frag": "GLSL", ".geom": "GLSL", ".comp": "GLSL",
+    ".nix": "Nix", ".zig": "Zig", ".nim": "Nim", ".nims": "Nim", ".cr": "Crystal",
+    ".ml": "OCaml", ".mli": "OCaml", ".lisp": "Lisp", ".lsp": "Lisp", ".el": "Emacs Lisp", ".scm": "Scheme",
+    ".cmake": "CMake", ".gd": "GDScript", ".qml": "QML", ".robot": "Robot Framework",
+    "cmake": "CMake", "makefile": "Makefile", "dockerfile": "Dockerfile",
+    "jenkinsfile": "Jenkinsfile", "rakefile": "Rake", "gemfile": "Gemfile", "vagrantfile": "Vagrantfile",
+}
+
+
+def paint(value, code):
+    if not USE_COLOR:
+        return str(value)
+    return f"{code}{value}{Color.RESET}"
+
+
+def terminal_width():
+    try:
+        return max(80, min(os.get_terminal_size().columns, 150))
+    except OSError:
+        return 100
+
+
+def rule(char="─"):
+    if not UNICODE:
+        char = "-"
+    return char * terminal_width()
+
+
+def now():
+    return datetime.now().strftime("%H:%M:%S")
+
+
+def shorten(text, width):
+    text = str(text)
+    if len(text) <= width:
+        return text
+    if width < 16:
+        return text[:width]
+    left = (width - 3) // 2
+    right = width - 3 - left
+    return text[:left] + "..." + text[-right:]
+
+
+def language_name(key):
+    return LANGUAGE_NAMES.get(key, key.lstrip(".").upper() or "Unknown")
+
+
+def language_key(file):
+    filename = file.name.lower()
+    ext = file.suffix.lower()
+
+    if filename == "cmakelists.txt":
+        return "cmake"
+    if filename in {"makefile", "gnumakefile"}:
+        return "makefile"
+    if filename == "dockerfile":
+        return "dockerfile"
+    if filename == "jenkinsfile":
+        return "jenkinsfile"
+    if filename == "rakefile":
+        return "rakefile"
+    if filename == "gemfile":
+        return "gemfile"
+    if filename == "vagrantfile":
+        return "vagrantfile"
+
+    return ext
+
+
+def banner(root):
+    print()
+    print(paint(rule("═"), Color.BRIGHT_CYAN))
+    print(
+        paint("  CODE COUNTER", Color.BRIGHT_CYAN + Color.BOLD)
+        + paint("  •  LIVE SOURCE SCANNER", Color.DIM)
+    )
+    print(paint(rule("═"), Color.BRIGHT_CYAN))
+    print(f"{paint(ICON['folder'], Color.BRIGHT_BLUE)} Root       : {paint(root, Color.BOLD)}")
+    print(f"{paint(ICON['info'], Color.BRIGHT_BLUE)} Chế độ     : {paint('LIVE SCAN', Color.BRIGHT_GREEN + Color.BOLD)}")
+    print(f"{paint(ICON['info'], Color.BRIGHT_BLUE)} Dòng đếm   : code thực, bỏ dòng trống + comment")
+    print(f"{paint(ICON['info'], Color.BRIGHT_BLUE)} Bỏ qua     : dependency / build / cache / VCS")
+    print()
+
+
+def log_file(index, total, status, lang, lines, rel_path):
+    percent = (index / total * 100.0) if total else 100.0
+    path_width = max(28, terminal_width() - 61)
+    rel_path = shorten(rel_path, path_width)
+
+    time_part = paint(now(), Color.DIM)
+    index_part = paint(f"[{index:04d}/{total:04d}]", Color.DIM)
+    percent_part = paint(f"{percent:6.2f}%", Color.CYAN)
+
+    if status == "OK":
+        icon = paint(ICON["file"], Color.BRIGHT_GREEN)
+        state = paint("COUNT", Color.BRIGHT_GREEN + Color.BOLD)
+        line_text = paint(f"+{lines:>8,}", Color.BRIGHT_GREEN)
+        lang_text = paint(f"{lang:<14.14}", Color.BRIGHT_MAGENTA)
+        path_text = paint(rel_path, Color.WHITE)
+    elif status == "EMPTY":
+        icon = paint(ICON["empty"], Color.DIM)
+        state = paint("EMPTY", Color.DIM)
+        line_text = paint(f"{0:>9}", Color.DIM)
+        lang_text = paint(f"{lang:<14.14}", Color.DIM)
+        path_text = paint(rel_path, Color.DIM)
+    else:
+        icon = paint(ICON["error"], Color.BRIGHT_RED)
+        state = paint("ERROR", Color.BRIGHT_RED + Color.BOLD)
+        line_text = paint(f"{'-':>9}", Color.BRIGHT_RED)
+        lang_text = paint(f"{lang:<14.14}", Color.BRIGHT_RED)
+        path_text = paint(rel_path, Color.BRIGHT_RED)
+
+    print(
+        f"{time_part} {index_part} {percent_part} {icon} "
+        f"{state:<16} {lang_text:<24} {line_text}  {path_text}",
+        flush=True,
     )
 
-    total_files = 0
-    total_lines = 0
 
-    skipped_errors = 0
+def discover_code_files(root):
+    candidates = []
+    ignored_dirs = 0
 
-    # os.walk tốt hơn rglob ở đây vì có thể chặn node_modules
-    # ngay trước khi Python đi vào thư mục đó.
     for current_dir, dirs, files in os.walk(root):
-
-        # Xóa các thư mục cần ignore khỏi danh sách duyệt.
-        # Như vậy node_modules/build/.git sẽ không bị scan luôn.
-        dirs[:] = [
-            d for d in dirs
-            if d.lower() not in IGNORE_DIRS_LOWER
-        ]
+        before = len(dirs)
+        dirs[:] = [d for d in dirs if d.lower() not in IGNORE_DIRS_LOWER]
+        ignored_dirs += before - len(dirs)
 
         current_path = Path(current_dir)
 
         for filename in files:
-
             filename_lower = filename.lower()
 
             if filename_lower in IGNORE_FILES_LOWER:
                 continue
 
             file = current_path / filename
-
             ext = file.suffix.lower()
 
-            is_normal_code = ext in CODE_EXTENSIONS_LOWER
-            is_special_code = filename_lower in SPECIAL_CODE_FILES_LOWER
+            if ext in CODE_EXTENSIONS_LOWER or filename_lower in SPECIAL_CODE_FILES_LOWER:
+                candidates.append(file)
 
-            if not is_normal_code and not is_special_code:
-                continue
+    return candidates, ignored_dirs
 
-            code_lines = count_code_lines(file)
 
-            if code_lines < 0:
-                skipped_errors += 1
-                print(f"[LỖI] Không đọc được: {file}")
-                continue
+def print_summary(root, stats, total_files, total_lines, empty_files, errors, ignored_dirs, elapsed):
+    print()
+    print(paint(rule("═"), Color.BRIGHT_CYAN))
+    print(paint(f"  {ICON['done']} SCAN COMPLETE", Color.BRIGHT_GREEN + Color.BOLD))
+    print(paint(rule("═"), Color.BRIGHT_CYAN))
 
-            if code_lines == 0:
-                continue
+    file_rate = total_files / elapsed if elapsed > 0 else 0.0
+    line_rate = total_lines / elapsed if elapsed > 0 else 0.0
 
-            total_files += 1
-            total_lines += code_lines
-
-            language_key = ext if ext else filename_lower
-
-            if filename_lower == "cmakelists.txt":
-                language_key = "cmake"
-
-            elif filename_lower == "makefile":
-                language_key = "makefile"
-
-            elif filename_lower == "dockerfile":
-                language_key = "dockerfile"
-
-            stats[language_key]["files"] += 1
-            stats[language_key]["lines"] += code_lines
-
-    # ========================================================
-    # OUTPUT
-    # ========================================================
+    print(f"  Root             : {paint(root, Color.BOLD)}")
+    print(f"  File có code     : {paint(f'{total_files:,}', Color.BRIGHT_GREEN + Color.BOLD)}")
+    print(f"  Tổng dòng code   : {paint(f'{total_lines:,}', Color.BRIGHT_GREEN + Color.BOLD)}")
+    print(f"  File rỗng/comment: {paint(f'{empty_files:,}', Color.DIM)}")
+    print(f"  File lỗi đọc     : {paint(f'{errors:,}', Color.BRIGHT_RED if errors else Color.DIM)}")
+    print(f"  Thư mục bỏ qua   : {paint(f'{ignored_dirs:,}', Color.BLUE)}")
+    print(f"  Thời gian        : {paint(f'{elapsed:.3f}s', Color.BRIGHT_MAGENTA)}")
+    print(f"  Tốc độ           : {paint(f'{file_rate:,.1f} file/s', Color.CYAN)}  |  {paint(f'{line_rate:,.0f} dòng/s', Color.CYAN)}")
 
     print()
-    print("=" * 72)
-    print(f"Thư mục        : {root}")
-    print(f"Tổng file code : {total_files:,}")
-    print(f"Tổng dòng code : {total_lines:,}")
+    print(paint(rule(), Color.BRIGHT_CYAN))
+    print(f"{'NGÔN NGỮ':<24}{'FILE':>12}{'DÒNG CODE':>20}{'TỶ LỆ':>14}")
+    print(paint(rule(), Color.DIM))
 
-    if skipped_errors:
-        print(f"File lỗi đọc    : {skipped_errors:,}")
+    merged = defaultdict(lambda: {"files": 0, "lines": 0})
 
-    print("=" * 72)
+    for key, data in stats.items():
+        name = language_name(key)
+        merged[name]["files"] += data["files"]
+        merged[name]["lines"] += data["lines"]
 
-    print(
-        f"{'Loại':<15}"
-        f"{'File':>12}"
-        f"{'Dòng code':>20}"
-        f"{'Tỷ lệ':>15}"
+    for name, data in sorted(merged.items(), key=lambda x: x[1]["lines"], reverse=True):
+        percent = data["lines"] / total_lines * 100 if total_lines else 0.0
+        row = f"{name:<24}{data['files']:>12,}{data['lines']:>20,}{percent:>13.2f}%"
+        print(paint(row, Color.WHITE if name != "Rust" else Color.BRIGHT_GREEN))
+
+    print(paint(rule("═"), Color.BRIGHT_CYAN))
+    print()
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+    global USE_COLOR
+
+    parser = argparse.ArgumentParser(
+        description="Đếm dòng code với live log, bỏ comment/dòng trống và thư mục rác."
+    )
+    parser.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        help="Thư mục cần quét. Mặc định: thư mục hiện tại.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Chỉ hiện bảng kết quả cuối, không hiện log từng file.",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Tắt màu terminal.",
     )
 
-    print("-" * 72)
+    args = parser.parse_args()
 
-    for ext, data in sorted(
-        stats.items(),
-        key=lambda x: x[1]["lines"],
-        reverse=True
-    ):
+    enable_ansi()
+    USE_COLOR = not args.no_color and sys.stdout.isatty()
 
-        percent = (
-            data["lines"] / total_lines * 100
-            if total_lines
-            else 0
-        )
+    root = Path(args.path).expanduser().resolve()
 
-        print(
-            f"{ext:<15}"
-            f"{data['files']:>12,}"
-            f"{data['lines']:>20,}"
-            f"{percent:>14.2f}%"
-        )
+    if not root.exists():
+        print(f"Không tồn tại: {root}", file=sys.stderr)
+        return 1
 
-    print("=" * 72)
+    if not root.is_dir():
+        print(f"Không phải thư mục: {root}", file=sys.stderr)
+        return 1
+
+    started = time.perf_counter()
+    banner(root)
+
+    print(
+        f"{paint(ICON['scan'], Color.BRIGHT_CYAN)} "
+        f"{paint('Đang tìm file code...', Color.BRIGHT_CYAN + Color.BOLD)}",
+        flush=True,
+    )
+
+    candidates, ignored_dirs = discover_code_files(root)
+    total_candidates = len(candidates)
+
+    print(
+        f"{paint(ICON['done'], Color.BRIGHT_GREEN)} "
+        f"Tìm thấy {paint(f'{total_candidates:,}', Color.BOLD)} file cần quét."
+    )
+    print()
+
+    if not args.quiet:
+        print(paint(rule(), Color.BRIGHT_CYAN))
+        print(paint("LIVE LOG", Color.BOLD))
+        print(paint(rule(), Color.BRIGHT_CYAN))
+
+    stats = defaultdict(lambda: {"files": 0, "lines": 0})
+    total_files = 0
+    total_lines = 0
+    empty_files = 0
+    skipped_errors = 0
+
+    for index, file in enumerate(candidates, start=1):
+        key = language_key(file)
+        lang = language_name(key)
+        code_lines = count_code_lines(file)
+
+        try:
+            rel = str(file.relative_to(root))
+        except ValueError:
+            rel = str(file)
+
+        if code_lines < 0:
+            skipped_errors += 1
+            if not args.quiet:
+                log_file(index, total_candidates, "ERROR", lang, 0, rel)
+            continue
+
+        if code_lines == 0:
+            empty_files += 1
+            if not args.quiet:
+                log_file(index, total_candidates, "EMPTY", lang, 0, rel)
+            continue
+
+        total_files += 1
+        total_lines += code_lines
+        stats[key]["files"] += 1
+        stats[key]["lines"] += code_lines
+
+        if not args.quiet:
+            log_file(index, total_candidates, "OK", lang, code_lines, rel)
+
+    elapsed = time.perf_counter() - started
+
+    print_summary(
+        root=root,
+        stats=stats,
+        total_files=total_files,
+        total_lines=total_lines,
+        empty_files=empty_files,
+        errors=skipped_errors,
+        ignored_dirs=ignored_dirs,
+        elapsed=elapsed,
+    )
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

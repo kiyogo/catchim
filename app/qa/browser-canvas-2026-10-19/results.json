@@ -1,0 +1,37 @@
+{
+  "browser": "Codex in-app browser",
+  "playbackRuns": [
+    {
+      "timestamp": "2026-10-19T13:47:55.729Z",
+      "bundle": "http://127.0.0.1:8766/assets/index-nzPB_Ae7.js",
+      "seconds": 10.003,
+      "uiRafHz": 60.1,
+      "rafP95Ms": 16.73,
+      "previewSubmissionsHz": 60,
+      "playheadMovesHz": 60.1,
+      "videoDecodedHz": 30,
+      "videoDropped": 0,
+      "longTasks": 0,
+      "backend": "webgpu"
+    },
+    {
+      "timestamp": "2026-10-19T13:50:17.111Z",
+      "bundle": "http://127.0.0.1:8766/assets/index-nzPB_Ae7.js",
+      "seconds": 10,
+      "uiRafHz": 60.1,
+      "rafP95Ms": 16.73,
+      "previewSubmissionsHz": 60,
+      "playheadMovesHz": 60.1,
+      "videoDecodedHz": 60,
+      "videoDropped": 0,
+      "longTasks": 0,
+      "backend": "webgpu"
+    }
+  ],
+  "timelineAllocation": {
+    "contentWidth": 41956,
+    "canvasWidth": 1142,
+    "canvasHeight": 65
+  },
+  "automatedTestsPassed": 29
+}

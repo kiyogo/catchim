@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -53,7 +54,7 @@ uint16_t readLittleEndianU16(const uint8_t* p) {
 }
 
 // 1. Native MP4 / MOV Box Parser
-bool probeMp4(const std::filesystem::path& path, double& outDuration, int& outWidth, int& outHeight, double& outFps) {
+bool probeMp4(const std::filesystem::path& path, double& outDuration, int& outWidth, int& outHeight, double& outFps,bool& outHasVideo,bool& outHasAudio) {
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) return false;
 
@@ -68,6 +69,7 @@ bool probeMp4(const std::filesystem::path& path, double& outDuration, int& outWi
     int videoWidth = 0;
     int videoHeight = 0;
     double fps = 30.0;
+    bool videoStream=false,audioStream=false;
 
     int64_t pos = 0;
     while (pos + 8 <= fileSize) {
@@ -125,6 +127,29 @@ bool probeMp4(const std::filesystem::path& path, double& outDuration, int& outWi
                                 }
                             }
                         } else if (std::strcmp(subType, "trak") == 0) {
+                            bool trackVideo=false,trackAudio=false;uint32_t mediaScale=0;
+                            uint64_t sampleCount=0,sampleTicks=0;
+                            std::function<void(size_t,size_t)> readMediaBoxes=[&](size_t begin,size_t end){
+                                for(size_t cursor=begin;cursor+8<=end;){
+                                    const uint32_t size=readBigEndianU32(moovData.data()+cursor);
+                                    if(size<8||size>end-cursor)break;
+                                    const auto* type=moovData.data()+cursor+4;
+                                    if(!std::memcmp(type,"mdia",4)||!std::memcmp(type,"minf",4)||!std::memcmp(type,"stbl",4))readMediaBoxes(cursor+8,cursor+size);
+                                    else if(!std::memcmp(type,"hdlr",4)&&size>=20){trackVideo|=!std::memcmp(moovData.data()+cursor+16,"vide",4);trackAudio|=!std::memcmp(moovData.data()+cursor+16,"soun",4);}
+                                    else if(!std::memcmp(type,"mdhd",4)&&size>=28){const size_t offset=moovData[cursor+8]?28:20;if(offset+4<=size)mediaScale=readBigEndianU32(moovData.data()+cursor+offset);}
+                                    else if(!std::memcmp(type,"stts",4)&&size>=16){
+                                        const auto entries=readBigEndianU32(moovData.data()+cursor+12);
+                                        for(uint32_t entry=0;entry<entries&&16+uint64_t(entry)*8+8<=size;++entry){
+                                            const auto* pair=moovData.data()+cursor+16+size_t(entry)*8;
+                                            const uint64_t count=readBigEndianU32(pair),delta=readBigEndianU32(pair+4);sampleCount+=count;sampleTicks+=count*delta;
+                                        }
+                                    }
+                                    cursor+=size;
+                                }
+                            };
+                            readMediaBoxes(mPos+8,mPos+subSize);
+                            videoStream|=trackVideo;audioStream|=trackAudio;
+                            if(trackVideo&&mediaScale&&sampleCount&&sampleTicks)fps=double(sampleCount)*mediaScale/sampleTicks;
                             size_t tPos = mPos + 8;
                             size_t tEnd = mPos + subSize;
                             while (tPos + 8 <= tEnd) {
@@ -163,6 +188,7 @@ bool probeMp4(const std::filesystem::path& path, double& outDuration, int& outWi
         outWidth = (videoWidth > 0) ? videoWidth : 1920;
         outHeight = (videoHeight > 0) ? videoHeight : 1080;
         outFps = fps;
+        outHasVideo=videoStream||videoWidth>0;outHasAudio=audioStream;
         return true;
     }
     return false;
@@ -471,7 +497,7 @@ core::Result<std::shared_ptr<MediaAsset>> MediaProbe::probe(const std::filesyste
 
     // 1. Try native container parsers first (fastest, direct)
     if (ext == ".mp4" || ext == ".mov" || ext == ".m4v" || ext == ".3gp") {
-        probed = probeMp4(path, durationSec, width, height, fps);
+        probed = probeMp4(path, durationSec, width, height, fps,hasVideo,hasAudio);
     } else if (ext == ".wav") {
         int ch = 2, sr = 44100;
         probed = probeWav(path, durationSec, ch, sr);

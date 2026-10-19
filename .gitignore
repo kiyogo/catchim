@@ -1,4 +1,5 @@
-# Build artifacts
+# C++ Build artifacts
+build/
 app/build/
 *.obj
 *.exe
@@ -6,12 +7,72 @@ app/build/
 *.ilk
 *.lib
 *.exp
+*.dll
+*.wasm.map
 .ninja_log
 .ninja_deps
 
-# IDE and OS
+# Rust build artifacts
+target/
+**/target/
+
+# Windows & Qt runtime deployment in root
+/platforms/
+/imageformats/
+/iconengines/
+/styles/
+/icons/
+
+# Web build & dependencies
+node_modules/
+web/node_modules/
+.next/
+web/.next/
+out/
+web/out/
+dist-browser/
+web/dist-browser/
+.turbo/
+web/.turbo/
+.content-collections/
+web/.content-collections/
+.font-cache/
+web/.font-cache/
+web/public/wasm/catchim_browser_core.*
+*.tsbuildinfo
+next-env.d.ts
+
+# Temporary debug media & QA test captures
+anh/
+*.mp4
+*.avi
+*.mov
+*.mkv
+1_topleft.png
+3_copy.png
+comp_*.png
+tl_tb_*.png
+app/*.png
+app/*.mp4
+app/*.ps1
+app/current_screenshot.png
+app/crop_new_topleft.png
+app/real_preview_tb.png
+app/tb_*.png
+app/found_*.png
+app/screenshot_*.png
+app/test_*.png
+app/test_*.mp4
+app/full_desktop_screenshot.png
+scan_encoding.py
+c.py
+
+# IDE, OS & Agent artifacts
 .vs/
 .vscode/
+.idea/
 Thumbs.db
 [Dd]esktop.ini
 *.log
+.agents/
+app/.agents/

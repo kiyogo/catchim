@@ -27,6 +27,7 @@ import { ShortcutsDialog } from "@/actions/components/shortcuts-dialog";
 import Image from "next/image";
 import { cn } from "@/utils/ui";
 import { useTranslation } from "@/i18n";
+import { EngineStatusBadge } from "./engine-status-badge";
 
 export function EditorHeader() {
 	return (
@@ -36,6 +37,7 @@ export function EditorHeader() {
 				<EditableProjectName />
 			</div>
 			<nav className="flex items-center gap-2">
+				<EngineStatusBadge />
 				<FeedbackPopover />
 				<ExportButton />
 				<ThemeToggle />

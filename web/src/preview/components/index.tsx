@@ -8,6 +8,7 @@ import { useContainerSize } from "@/hooks/use-container-size";
 import { useFullscreen } from "@/hooks/use-fullscreen";
 import { CanvasRenderer } from "@/services/renderer/canvas-renderer";
 import { TICKS_PER_SECOND } from "@/wasm";
+import { previewVideoPool } from "@/services/video-cache/preview-video";
 import type { RootNode } from "@/services/renderer/nodes/root-node";
 import { buildScene } from "@/services/renderer/scene-builder";
 import { PreviewOverlayLayer } from "./overlay-layer";
@@ -157,36 +158,54 @@ function PreviewCanvas({
 	const { canPan, panByScreenDelta, scaleZoom } = viewport;
 
 	const renderer = useMemo(() => {
+		if (!activeProject || !nativeWidth || !nativeHeight) return null;
 		return new CanvasRenderer({
 			width: nativeWidth,
 			height: nativeHeight,
 			fps: activeProject.settings.fps,
+			isPreview: true,
 		});
-	}, [nativeWidth, nativeHeight, activeProject.settings.fps]);
+	}, [nativeWidth, nativeHeight, activeProject?.settings.fps]);
+	useEffect(() => { renderer?.activate(); return () => renderer?.dispose(); }, [renderer]);
+	useEffect(() => {
+		const sync = () => { if (!editor.playback.getIsPlaying()) previewVideoPool.pause(); };
+		const unsubscribe = editor.playback.subscribe(sync);
+		return () => { unsubscribe(); previewVideoPool.clear(); };
+	}, [editor]);
 
 	// Mount the compositor's output canvas directly into the preview. wgpu
 	// renders straight into this element, so there is no intermediate copy —
-	// the container div owns positioning/styling, the canvas itself fills it.
 	useEffect(() => {
 		const mount = canvasMountRef.current;
-		if (!mount) return;
+		if (!mount || !renderer) return;
 		const outputCanvas = renderer.getOutputCanvas();
+		outputCanvas.id = "opencut-webgpu-viewport";
+		outputCanvas.className = "opencut-webgpu-compositor";
+		outputCanvas.setAttribute("data-engine", "webgpu");
 		outputCanvas.style.display = "block";
 		outputCanvas.style.width = "100%";
 		outputCanvas.style.height = "100%";
-		mount.appendChild(outputCanvas);
+		if (!mount.contains(outputCanvas)) {
+			mount.innerHTML = "";
+			mount.appendChild(outputCanvas);
+		}
 		return () => {
-			if (outputCanvas.parentElement === mount) {
-				mount.removeChild(outputCanvas);
+			try {
+				if (outputCanvas.parentElement === mount) {
+					outputCanvas.remove();
+				}
+			} catch {
+				// Prevent NotFoundError during React Fast Refresh / reconciliation
 			}
 		};
 	}, [renderer]);
 
 	const render = useCallback(() => {
-		if (!renderTree || renderingRef.current) return;
+		if (!renderTree || !renderer || renderingRef.current) return;
+		renderer.playing = editor.playback.getIsPlaying();
 
 		const renderTime = Math.min(
-			editor.playback.getCurrentTime(),
+			editor.playback.getDisplayTime(),
 			editor.timeline.getLastFrameTime(),
 		);
 		const ticksPerFrame = Math.round(
@@ -195,7 +214,7 @@ function PreviewCanvas({
 		const frame = Math.floor(renderTime / ticksPerFrame);
 
 		if (
-			frame === lastFrameRef.current &&
+			!renderer.playing && frame === lastFrameRef.current &&
 			renderTree === lastSceneRef.current
 		) {
 			return;
@@ -208,6 +227,11 @@ function PreviewCanvas({
 			.render({ node: renderTree, time: renderTime })
 			.then(() => {
 				renderingRef.current = false;
+			}).catch((error) => {
+				// A failed decode must not leave the preview permanently locked.
+				renderingRef.current = false;
+				lastFrameRef.current = -1;
+				console.error("Preview render failed", error);
 			});
 	}, [renderer, renderTree, editor.playback, editor.timeline]);
 
@@ -306,10 +330,12 @@ function PreviewCanvas({
 						<ContextMenuTrigger asChild>
 							<div
 								ref={viewportRef}
+								data-engine="webgpu-viewport"
 								className="relative flex size-full min-h-0 min-w-0 items-center justify-center overflow-hidden"
 							>
 							<div
 								ref={canvasMountRef}
+								data-engine="webgpu-canvas-mount"
 								className="absolute block border"
 								style={{
 									left: viewport.sceneLeft,
@@ -317,9 +343,9 @@ function PreviewCanvas({
 									width: viewport.sceneWidth,
 									height: viewport.sceneHeight,
 									background:
-										activeProject.settings.background.type === "blur"
+										activeProject?.settings?.background?.type === "blur"
 											? "transparent"
-											: activeProject?.settings.background.color,
+											: activeProject?.settings?.background?.color || "#000000",
 								}}
 							/>
 								<PreviewOverlayLayer

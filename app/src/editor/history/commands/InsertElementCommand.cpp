@@ -48,7 +48,14 @@ bool InsertElementCommand::execute() {
     }
 
     // 2. Resolve placement
+    auto createTrack=[this](TrackType type,const std::string& name)->Track& {
+        if(createdTrackId_.isEmpty())createdTrackId_=core::TrackId::generate();
+        return timeline_.insertTrack(type,name,std::nullopt,createdTrackId_);
+    };
     targetTrackId_ = core::TrackId::empty();
+    if(placement_.mode==InsertElementPlacement::Mode::NewTrack) {
+        targetTrackId_=createTrack(placement_.autoTrackType,"New track").id();
+    }
 
     if (placement_.mode == InsertElementPlacement::Mode::Explicit) {
         Track* t = timeline_.findTrack(placement_.explicitTrackId);
@@ -71,7 +78,7 @@ bool InsertElementCommand::execute() {
                     }
                 }
                 if (targetTrackId_.isEmpty()) {
-                    Track& newOt = timeline_.addTrack(TrackType::Video, "Video Overlay");
+                    Track& newOt = createTrack(TrackType::Video, "Video Overlay");
                     targetTrackId_ = newOt.id();
                 }
             }
@@ -83,7 +90,7 @@ bool InsertElementCommand::execute() {
                 }
             }
             if (targetTrackId_.isEmpty()) {
-                Track& newAt = timeline_.addTrack(TrackType::Audio, "Audio Track");
+                Track& newAt = createTrack(TrackType::Audio, "Audio Track");
                 targetTrackId_ = newAt.id();
             }
         } else {
@@ -99,7 +106,7 @@ bool InsertElementCommand::execute() {
                                (element_.type() == ClipType::Effect) ? TrackType::Effect : TrackType::Graphic;
                 std::string name = (element_.type() == ClipType::Text) ? "Text Track" :
                                    (element_.type() == ClipType::Effect) ? "Effect Track" : "Graphic Track";
-                Track& newOt = timeline_.addTrack(tt, name);
+                Track& newOt = createTrack(tt, name);
                 targetTrackId_ = newOt.id();
             }
         }
@@ -110,7 +117,8 @@ bool InsertElementCommand::execute() {
 
     element_.setStartTime(placement_.startTime);
     insertedClipId_ = element_.id();
-    dst->clips().push_back(std::move(element_));
+    // Retain the command's element template for redo.
+    dst->clips().push_back(element_);
     dst->sortClips();
 
     return true;

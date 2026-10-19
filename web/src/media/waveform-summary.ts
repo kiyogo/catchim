@@ -3,6 +3,7 @@
 import { getSourceTimeAtClipTime } from "@/retime";
 import type { RetimeConfig } from "@/timeline";
 import { getNativeTimelineBindings } from "@/native/opencut-core";
+import { webGpuEngine } from "@/native/webgpu-engine";
 
 const RMS_ANALYSIS_WINDOW_SECONDS = 0.02;
 const DEFAULT_SOURCE_WAVEFORM_BUCKET_SIZE = 128;
@@ -125,6 +126,57 @@ export function buildSourceWaveformSummary({
 		bucketSize: safeBucketSize,
 		amplitudes: Float32Array.from(amplitudes),
 	};
+}
+
+export async function buildSourceWaveformSummaryAsync({
+	sourceKey,
+	buffer,
+	bucketSize = DEFAULT_SOURCE_WAVEFORM_BUCKET_SIZE,
+}: {
+	sourceKey: string;
+	buffer: AudioBuffer;
+	bucketSize?: number;
+}): Promise<SourceWaveformSummary> {
+	const safeBucketSize = Math.max(1, Math.floor(bucketSize));
+	const bucketCount = Math.max(1, Math.ceil(buffer.length / safeBucketSize));
+
+	if (webGpuEngine.isWebGpuSupported() && buffer.length > 0 && bucketCount > 0) {
+		try {
+			if (!webGpuEngine.isAvailable) {
+				await webGpuEngine.initialize();
+			}
+			if (webGpuEngine.isAvailable) {
+				const channels = buffer.numberOfChannels;
+				const outAmplitudes = new Float32Array(bucketCount);
+
+				for (let c = 0; c < channels; c++) {
+					const channelData = buffer.getChannelData(c);
+					const peaks = await webGpuEngine.computeAudioWaveformPeaks({
+						samples: channelData,
+						numBuckets: bucketCount,
+					});
+					for (let b = 0; b < bucketCount; b++) {
+						const peakAmp = Math.max(Math.abs(peaks[b * 2]), Math.abs(peaks[b * 2 + 1]));
+						if (peakAmp > outAmplitudes[b]) {
+							outAmplitudes[b] = peakAmp;
+						}
+					}
+				}
+
+				return {
+					sourceKey,
+					sampleRate: buffer.sampleRate,
+					totalSamples: buffer.length,
+					bucketSize: safeBucketSize,
+					amplitudes: outAmplitudes,
+				};
+			}
+		} catch (e) {
+			console.warn("[OpenCut] WebGPU waveform compute error, falling back to WASM/CPU:", e);
+		}
+	}
+
+	return buildSourceWaveformSummary({ sourceKey, buffer, bucketSize });
 }
 
 export function buildWaveformSampleBuckets({

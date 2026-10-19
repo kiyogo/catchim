@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/fonts">
+    <file alias="Inter.ttf">fonts/Inter.ttf</file>
+    <file alias="OFL.txt">fonts/OFL.txt</file>
+  </qresource>
+</RCC>

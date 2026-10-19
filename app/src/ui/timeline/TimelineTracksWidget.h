@@ -2,6 +2,11 @@
 
 #if defined(HAVE_QT6)
 #include <QWidget>
+#include <QHash>
+#include <QImage>
+#include <QSet>
+#include <QThreadPool>
+#include <QElapsedTimer>
 #include "editor/EditorEngine.h"
 #include "media/MediaLibrary.h"
 
@@ -15,14 +20,18 @@ public:
         media::MediaLibrary& mediaLibrary,
         QWidget* parent = nullptr
     );
+    ~TimelineTracksWidget() override;
 
     void setZoomFactor(double zoom) { zoomFactor_ = zoom; update(); }
     void setScrollOffset(int x, int y) { scrollX_ = x; scrollY_ = y; update(); }
 
     int totalTracksHeight() const;
     QSize sizeHint() const override;
+    int viewportXAtTime(core::TimelineTime time) const {return timeToPixel(time);}
+    core::TimelineTime timeAtViewportX(int x) const {return pixelToTime(x);}
 
 signals:
+    void mediaRevealRequested(core::MediaId mediaId);
     void seekRequested(core::TimelineTime time);
     void clipSelected(core::ClipId clipId);
 
@@ -36,6 +45,7 @@ protected:
     void dragLeaveEvent(QDragLeaveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    bool event(QEvent* event) override;
 
 private:
     enum class DragMode { None, MovingClip, TrimmingStart, TrimmingEnd, BoxSelecting };
@@ -55,11 +65,12 @@ private:
     const editor::Track* findTrackAtY(int y) const;
     core::TimelineTime pixelToTime(int pixelX) const;
     int timeToPixel(core::TimelineTime time) const;
+    QImage thumbnail(const editor::Clip& clip, double sourceTime);
 
     editor::EditorEngine& engine_;
     media::MediaLibrary& mediaLibrary_;
 
-    double zoomFactor_{1.0};
+    double zoomFactor_{8.82};
     int scrollX_{0};
     int scrollY_{0};
 
@@ -71,6 +82,14 @@ private:
     int snapIndicatorX_{-1};
     QRect dropIndicatorRect_;
     bool showDropIndicator_{false};
+    std::optional<editor::TimelineTracksSnapshot> dragSnapshot_;
+    editor::Timeline* dragTimeline_{nullptr};
+    bool dragEdited_{false};
+    QElapsedTimer dragRefresh_;
+    QHash<QString,QImage> thumbnails_;
+    QHash<QString,QImage> thumbnailCovers_;
+    QSet<QString> pendingThumbnails_;
+    QThreadPool thumbnailPool_;
 };
 
 } // namespace catchim::ui

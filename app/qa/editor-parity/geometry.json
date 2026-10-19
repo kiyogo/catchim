@@ -1,0 +1,404 @@
+{
+    "captures": [
+        {
+            "device_pixel_ratio": 1,
+            "font": "Inter",
+            "height": 938,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/editor-1912x938.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    470,
+                    436
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    302,
+                    135
+                ],
+                "previewPanel": [
+                    484,
+                    53,
+                    940,
+                    436
+                ],
+                "previewPlayBtn": [
+                    938,
+                    444,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    1244,
+                    446,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    1432,
+                    53,
+                    470,
+                    436
+                ],
+                "sceneSplitWidget": [
+                    914,
+                    504,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    497,
+                    1896,
+                    435
+                ]
+            },
+            "width": 1912
+        },
+        {
+            "device_pixel_ratio": 1,
+            "font": "Inter",
+            "height": 720,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/editor-1280x720.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    312,
+                    327
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    253,
+                    149
+                ],
+                "previewPanel": [
+                    326,
+                    53,
+                    624,
+                    327
+                ],
+                "previewPlayBtn": [
+                    622,
+                    335,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    770,
+                    337,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    958,
+                    53,
+                    312,
+                    327
+                ],
+                "sceneSplitWidget": [
+                    598,
+                    395,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    388,
+                    1264,
+                    326
+                ]
+            },
+            "width": 1280
+        },
+        {
+            "device_pixel_ratio": 1,
+            "font": "Inter",
+            "height": 768,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/editor-1366x768.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    334,
+                    351
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    275,
+                    149
+                ],
+                "previewPanel": [
+                    348,
+                    53,
+                    667,
+                    351
+                ],
+                "previewPlayBtn": [
+                    666,
+                    359,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    835,
+                    361,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    1023,
+                    53,
+                    333,
+                    351
+                ],
+                "sceneSplitWidget": [
+                    641,
+                    419,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    412,
+                    1350,
+                    350
+                ]
+            },
+            "width": 1366
+        },
+        {
+            "device_pixel_ratio": 1,
+            "font": "Inter",
+            "height": 900,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/editor-1440x900.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    352,
+                    417
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    293,
+                    149
+                ],
+                "previewPanel": [
+                    366,
+                    53,
+                    704,
+                    417
+                ],
+                "previewPlayBtn": [
+                    702,
+                    425,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    890,
+                    427,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    1078,
+                    53,
+                    352,
+                    417
+                ],
+                "sceneSplitWidget": [
+                    678,
+                    485,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    478,
+                    1424,
+                    416
+                ]
+            },
+            "width": 1440
+        },
+        {
+            "device_pixel_ratio": 1,
+            "font": "Inter",
+            "height": 1080,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/editor-1920x1080.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    472,
+                    507
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    302,
+                    135
+                ],
+                "previewPanel": [
+                    486,
+                    53,
+                    944,
+                    507
+                ],
+                "previewPlayBtn": [
+                    942,
+                    515,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    1250,
+                    517,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    1438,
+                    53,
+                    472,
+                    507
+                ],
+                "sceneSplitWidget": [
+                    918,
+                    575,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    568,
+                    1904,
+                    506
+                ]
+            },
+            "width": 1920
+        },
+        {
+            "device_pixel_ratio": 1,
+            "font": "Inter",
+            "height": 1440,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/editor-2560x1440.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    632,
+                    687
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    302,
+                    135
+                ],
+                "previewPanel": [
+                    646,
+                    53,
+                    1264,
+                    687
+                ],
+                "previewPlayBtn": [
+                    1262,
+                    695,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    1730,
+                    697,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    1918,
+                    53,
+                    632,
+                    687
+                ],
+                "sceneSplitWidget": [
+                    1238,
+                    755,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    748,
+                    2544,
+                    686
+                ]
+            },
+            "width": 2560
+        },
+        {
+            "device_pixel_ratio": 1,
+            "font": "Inter",
+            "height": 2160,
+            "image": "E:/DATA/source/catchim/app/qa/editor-parity/editor-3840x2160.png",
+            "widgets": {
+                "assetsPanel": [
+                    6,
+                    53,
+                    952,
+                    1047
+                ],
+                "mediaDropCard": [
+                    56,
+                    106,
+                    302,
+                    135
+                ],
+                "previewPanel": [
+                    966,
+                    53,
+                    1904,
+                    1047
+                ],
+                "previewPlayBtn": [
+                    1902,
+                    1055,
+                    32,
+                    32
+                ],
+                "previewZoomCombo": [
+                    2690,
+                    1057,
+                    106,
+                    28
+                ],
+                "propertiesPanel": [
+                    2878,
+                    53,
+                    952,
+                    1047
+                ],
+                "sceneSplitWidget": [
+                    1878,
+                    1115,
+                    124,
+                    28
+                ],
+                "timelinePanel": [
+                    6,
+                    1108,
+                    3824,
+                    1046
+                ]
+            },
+            "width": 3840
+        }
+    ],
+    "passed": true
+}

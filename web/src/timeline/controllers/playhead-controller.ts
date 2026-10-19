@@ -168,12 +168,16 @@ export class PlayheadController {
 		const playheadEl = this.config.getPlayheadEl();
 		if (!playheadEl) return;
 
-		const centerPixel = timelineTimeToSnappedPixels({
+		const toPixels = this.config.getIsPlaying() ? timelineTimeToPixels : timelineTimeToSnappedPixels;
+		const centerPixel = toPixels({
 			time,
 			zoomLevel: this.config.zoomLevel,
 		});
 		const scrollLeft = this.config.getRulerScrollEl()?.scrollLeft ?? 0;
-		playheadEl.style.left = `${getCenteredLineLeft({ centerPixel }) - scrollLeft}px`;
+		// Offset by needle canvas half-width (12px - 0.5px) to keep center needle perfectly aligned
+		const x = getCenteredLineLeft({ centerPixel }) - scrollLeft - 11.5;
+		playheadEl.style.left = "0px";
+		playheadEl.style.transform = `translate3d(${x}px, 0, 0)`;
 	}
 
 	/**

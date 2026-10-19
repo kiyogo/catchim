@@ -4,8 +4,9 @@
   "private": true,
   "packageManager": "bun@1.2.18",
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev --turbopack -p 3300",
     "build": "next build",
+    "build:browser": "vite build --config vite.browser.config.ts",
     "start": "next start",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
@@ -92,6 +93,7 @@
     "@types/pg": "^8.15.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@webgpu/types": "^0.1.74",
     "cross-env": "^7.0.3",
     "dotenv": "^16.5.0",
     "drizzle-kit": "^0.31.4",
@@ -99,6 +101,8 @@
     "sharp": "^0.34.5",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.8.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5",
     "wrangler": "^4.77.0"
   }
 }

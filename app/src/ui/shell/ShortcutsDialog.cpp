@@ -13,68 +13,23 @@
 namespace catchim::ui {
 
 ShortcutsDialog::ShortcutsDialog(QWidget* parent)
-    : QDialog(parent)
+    : AppDialog("Phím tắt",parent)
 {
-    const auto& pal = Theme::instance().palette();
-    setWindowTitle("Phím tắt Catchim");
     setModal(true);
-    setFixedSize(580, 520);
-    setStyleSheet(QString(R"(
-        QDialog {
-            background-color: %1;
-            border: 1px solid %2;
-            border-radius: 10px;
-        }
-    )").arg(pal.background.name()).arg(pal.border.name()));
+    setFixedSize(604,560);
     setupUi();
 }
 
 void ShortcutsDialog::setupUi() {
     const auto& pal = Theme::instance().palette();
-    auto* rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(20, 16, 20, 16);
+    auto* rootLayout = bodyLayout();
     rootLayout->setSpacing(12);
 
-    // Header
-    auto* headerLayout = new QHBoxLayout();
-    auto* iconLabel = new QLabel(this);
-    iconLabel->setPixmap(UiIcons::getPixmap(UiIcon::Keyboard, pal.primaryAccent, 20));
-    headerLayout->addWidget(iconLabel);
-
-    auto* titleLabel = new QLabel("Phím tắt ứng dụng (Keyboard Shortcuts)", this);
-    titleLabel->setStyleSheet(QString("font-size: 15px; font-weight: 700; color: %1;").arg(pal.textPrimary.name()));
-    headerLayout->addWidget(titleLabel);
-    headerLayout->addStretch();
-
-    auto* closeBtn = new QPushButton("✕", this);
-    closeBtn->setFixedSize(28, 28);
-    closeBtn->setStyleSheet(QString(R"(
-        QPushButton {
-            background: transparent;
-            color: %1;
-            font-size: 14px;
-            font-weight: 600;
-            border: none;
-            border-radius: 4px;
-        }
-        QPushButton:hover {
-            background: %2;
-            color: %3;
-        }
-    )").arg(pal.textSecondary.name()).arg(pal.border.name()).arg(pal.textPrimary.name()));
-    connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
-    headerLayout->addWidget(closeBtn);
-    rootLayout->addLayout(headerLayout);
-
-    // Separator line
-    auto* sep = new QFrame(this);
-    sep->setFrameShape(QFrame::HLine);
-    sep->setStyleSheet(QString("color: %1;").arg(pal.border.name()));
-    rootLayout->addWidget(sep);
 
     // Scroll Area
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setStyleSheet("QScrollArea { border: none; background: transparent; }");
 
     auto* container = new QWidget(scroll);
@@ -94,52 +49,61 @@ void ShortcutsDialog::setupUi() {
 
     std::vector<CategoryDef> categories = {
         {
-            "Phát lại & Điều hướng (Playback & Navigation)",
+            "Playback & Navigation",
             {
-                {"Phát / Tạm dừng video", "Space"},
-                {"Về đầu dòng thời gian", "Home"},
-                {"Đến cuối dòng thời gian", "End"},
-                {"Lùi 1 khung hình", "◄ (Trái)"},
-                {"Tiến 1 khung hình", "► (Phải)"},
-                {"Nhảy lùi 5 giây", "Shift + ◄"},
-                {"Nhảy tiến 5 giây", "Shift + ►"}
+                {"Play / Pause video", "Space"},
+                {"Jump to timeline start", "Home"},
+                {"Jump to timeline end", "End"},
+                {"Previous frame", "Left"},
+                {"Next frame", "Right"},
+                {"Jump backward 5s", "Shift + Left"},
+                {"Jump forward 5s", "Shift + Right"}
             }
         },
         {
-            "Chỉnh sửa dòng thời gian (Timeline Editing)",
+            "Timeline Editing",
             {
-                {"Cắt phần tử tại đầu đọc (Split)", "S"},
-                {"Cắt bỏ đoạn bên trái (Split Left)", "Q"},
-                {"Cắt bỏ đoạn bên phải (Split Right)", "W"},
-                {"Nhân bản phần tử (Duplicate)", "Ctrl + D"},
-                {"Xóa phần tử đang chọn (Delete)", "Delete / Backspace"},
-                {"Đánh dấu mốc thời gian (Marker)", "M"},
-                {"Bật/tắt tự động hít nam châm (Snapping)", "N"},
-                {"Bật/tắt chế độ Ripple Editing", "R"}
+                {"Split element at playhead", "S"},
+                {"Split left at playhead", "Q"},
+                {"Split right at playhead", "W"},
+                {"Duplicate element", "Ctrl + D"},
+                {"Delete selected element", "Delete / Backspace"},
+                {"Add marker", "M"},
+                {"Toggle snapping", "N"},
+                {"Toggle ripple editing", "R"}
             }
         },
         {
-            "Lịch sử & Dự án (History & Project)",
+            "History & Project",
             {
-                {"Hoàn tác thay đổi (Undo)", "Ctrl + Z"},
-                {"Làm lại thay đổi (Redo)", "Ctrl + Y"},
-                {"Chọn tất cả phần tử (Select All)", "Ctrl + A"},
-                {"Bỏ chọn tất cả phần tử", "Escape"},
-                {"Lưu dự án", "Ctrl + S"}
+                {"Open projects hub", "Ctrl + Shift + O"},
+                {"Open project", "Ctrl + O"},
+                {"Save project", "Ctrl + S"},
+                {"Undo", "Ctrl + Z"},
+                {"Redo", "Ctrl + Y"},
+                {"Select all elements", "Ctrl + A"},
+                {"Deselect all elements", "Escape"}
             }
         },
         {
-            "Khung xem trước & Xuất bản (Preview & Export)",
+            "Preview & Export",
             {
-                {"Bật/tắt khung an toàn (Safe Zones)", "T"},
-                {"Chế độ toàn màn hình (Fullscreen)", "F11"},
-                {"Hộp thoại xuất video hoàn chỉnh", "Ctrl + E"}
+                {"Toggle safe zones", "T"},
+                {"Toggle fullscreen", "F11"},
+                {"Export video", "Ctrl + E"}
             }
         }
     };
 
+    const QMap<QString,QString> vi={
+        {"Playback & Navigation","PHÁT & ĐIỀU HƯỚNG"},{"Timeline Editing","CHỈNH SỬA DÒNG THỜI GIAN"},{"History & Project","LỊCH SỬ & DỰ ÁN"},{"Preview & Export","XEM TRƯỚC & XUẤT"},
+        {"Play / Pause video","Phát / Tạm dừng video"},{"Jump to timeline start","Về đầu dòng thời gian"},{"Jump to timeline end","Đến cuối dòng thời gian"},{"Previous frame","Khung hình trước"},{"Next frame","Khung hình sau"},{"Jump backward 5s","Lùi 5 giây"},{"Jump forward 5s","Tiến 5 giây"},
+        {"Split element at playhead","Cắt tại đầu phát"},{"Split left at playhead","Cắt phần bên trái"},{"Split right at playhead","Cắt phần bên phải"},{"Duplicate element","Nhân đôi phần tử"},{"Delete selected element","Xóa phần tử đã chọn"},{"Add marker","Thêm dấu mốc"},{"Toggle snapping","Bật / Tắt bắt dính"},{"Toggle ripple editing","Bật / Tắt chỉnh sửa ripple"},
+        {"Open projects hub","Mở danh sách dự án"},{"Open project","Mở dự án"},{"Save project","Lưu dự án"},{"Undo","Hoàn tác"},{"Redo","Làm lại"},{"Select all elements","Chọn tất cả phần tử"},{"Deselect all elements","Bỏ chọn tất cả"},{"Toggle safe zones","Bật / Tắt vùng an toàn"},{"Toggle fullscreen","Bật / Tắt toàn màn hình"},{"Export video","Xuất video"}
+    };
+    const auto localized=[&](const QString& text){return editorEnglish()?text:vi.value(text,text);};
     for (const auto& cat : categories) {
-        auto* catHeader = new QLabel(cat.name, container);
+        auto* catHeader = new QLabel(localized(cat.name), container);
         catHeader->setStyleSheet(QString("font-size: 11px; font-weight: 700; color: %1; text-transform: uppercase; letter-spacing: 0.5px; padding-top: 4px;").arg(pal.primaryAccent.name()));
         cLayout->addWidget(catHeader);
 
@@ -147,14 +111,15 @@ void ShortcutsDialog::setupUi() {
         auto* boxLayout = new QVBoxLayout(catBox);
         boxLayout->setContentsMargins(10, 8, 10, 8);
         boxLayout->setSpacing(8);
-        catBox->setStyleSheet(QString("background-color: %1; border: 1px solid %2; border-radius: 6px;")
+        catBox->setObjectName("shortcutCategory");
+        catBox->setStyleSheet(QString("#shortcutCategory{background-color: %1; border: 1px solid %2; border-radius: 6px;} #shortcutCategory QLabel{background:transparent;border:none;}")
             .arg(pal.panelBackground.name()).arg(pal.border.name()));
 
         for (const auto& item : cat.shortcuts) {
             auto* row = new QHBoxLayout();
             row->setContentsMargins(0, 0, 0, 0);
 
-            auto* descLabel = new QLabel(item.action, catBox);
+            auto* descLabel = new QLabel(localized(item.action), catBox);
             descLabel->setStyleSheet(QString("font-size: 12px; color: %1; font-weight: 500;").arg(pal.textPrimary.name()));
             row->addWidget(descLabel);
 

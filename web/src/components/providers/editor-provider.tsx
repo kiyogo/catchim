@@ -16,6 +16,7 @@ import {
 } from "@/services/renderer/gpu-renderer";
 import { useTranslation } from "@/i18n";
 import { warmNativeTimelineCore } from "@/native/opencut-core";
+import { resetBrowserHistory } from "@/native/browser-editor-core";
 
 interface EditorProviderProps {
 	projectId: string;
@@ -45,6 +46,7 @@ export function EditorProvider({ projectId, children }: EditorProviderProps) {
 				await initializeGpuRenderer();
 				editor.renderer.setDegraded(!isGpuAvailable());
 				await editor.project.loadProject({ id: projectId });
+				resetBrowserHistory(editor);
 
 				if (cancelled) return;
 

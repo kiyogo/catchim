@@ -4,7 +4,31 @@
 #include <fstream>
 #include <sstream>
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace catchim::storage {
+
+namespace {
+void persistBrowserFilesystem() {
+#if defined(__EMSCRIPTEN__)
+    EM_ASM({
+        if (Module.catchimPersistNow) Module.catchimPersistNow();
+    });
+#endif
+}
+}
 
 std::filesystem::path ProjectStorage::getDefaultProjectsDirectory() {
     std::filesystem::path baseDir;
@@ -104,23 +128,30 @@ core::Result<void> ProjectStorage::saveAtomic(const editor::Project& project, co
     }
 
     // 3. Atomic rename/replace
+#if defined(_WIN32)
+    if (!MoveFileExW(reinterpret_cast<LPCWSTR>(tmpPath.c_str()), reinterpret_cast<LPCWSTR>(path.c_str()), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DWORD err = GetLastError();
+        std::filesystem::remove(tmpPath, ec);
+        return core::Result<void>(core::ErrorCode::InternalError, "Atomic MoveFileExW failed with error code: " + std::to_string(err));
+    }
+#else
     std::filesystem::rename(tmpPath, path, ec);
     if (ec) {
-        // If rename failed (e.g. on Windows destination exists), try remove and rename
-        std::filesystem::remove(path, ec);
-        std::filesystem::rename(tmpPath, path, ec);
-        if (ec) {
-            return core::Result<void>(core::ErrorCode::InternalError, "Atomic rename failed: " + ec.message());
-        }
+        std::filesystem::remove(tmpPath, ec);
+        return core::Result<void>(core::ErrorCode::InternalError, "Atomic rename failed: " + ec.message());
     }
+#endif
 
     LOG_INFO("Successfully saved project to: {}", path.string());
+    persistBrowserFilesystem();
     return core::Result<void>::success();
 }
 
 bool ProjectStorage::deleteProject(const std::filesystem::path& path) {
     std::error_code ec;
-    return std::filesystem::remove(path, ec);
+    const bool removed = std::filesystem::remove(path, ec);
+    if (removed && !ec) persistBrowserFilesystem();
+    return removed && !ec;
 }
 
 } // namespace catchim::storage

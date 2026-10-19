@@ -3,7 +3,9 @@
 #if defined(HAVE_QT6)
 #include "app/AppConfig.h"
 #include "ui/theme/Theme.h"
+#include "ui/widgets/EditorLanguage.h"
 #include "ui/export/ExportDialog.h"
+#include "ui/projects/ProjectsHubDialog.h"
 #include <QVBoxLayout>
 #include <QKeyEvent>
 #include <QFileDialog>
@@ -15,9 +17,33 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QPushButton>
+#include <QPainter>
+#include <QSplitterHandle>
 #include <cmath>
 
 namespace catchim::ui {
+
+class EditorSplitterHandle final:public QSplitterHandle {
+public:
+    EditorSplitterHandle(Qt::Orientation orientation,QSplitter* parent):QSplitterHandle(orientation,parent) {
+        setObjectName("editorSplitterHandle");setMouseTracking(true);
+    }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);painter.setRenderHint(QPainter::Antialiasing);
+        const auto& palette=Theme::instance().palette();
+        painter.fillRect(rect(),palette.panelBackground);
+        painter.setPen(Qt::NoPen);painter.setBrush(underMouse()?palette.textSecondary:palette.border);
+        if(orientation()==Qt::Vertical)painter.drawRoundedRect(QRectF(width()/2.-16,height()/2.-1,32,2),1,1);
+        else painter.drawRoundedRect(QRectF(width()/2.-1,height()/2.-16,2,32),1,1);
+    }
+    void enterEvent(QEnterEvent* event) override {QSplitterHandle::enterEvent(event);update();}
+    void leaveEvent(QEvent* event) override {QSplitterHandle::leaveEvent(event);update();}
+};
+class EditorSplitter final:public QSplitter {
+public:using QSplitter::QSplitter;
+protected:QSplitterHandle* createHandle() override {return new EditorSplitterHandle(orientation(),this);}
+};
 
 MainWindow::MainWindow(
     editor::EditorEngine& engine,
@@ -33,6 +59,7 @@ MainWindow::MainWindow(
     setWindowTitle("Catchim Video Editor");
     resize(1440, 900);
 
+    qApp->setProperty("editorLanguage",QSettings().value("ui/language","vi").toString());
     setupUi();
     setupEngineCallbacks();
 
@@ -51,15 +78,22 @@ MainWindow::MainWindow(
 
     // 60fps tick timer for playback and rendering
     tickTimer_ = new QTimer(this);
+    tickTimer_->setTimerType(Qt::PreciseTimer);
     connect(tickTimer_, &QTimer::timeout, this, &MainWindow::onAppTick);
+#if defined(__EMSCRIPTEN__)
+    tickTimer_->start(33); // browser video cadence; leave time for media callbacks
+#else
     tickTimer_->start(16); // ~60 Hz
+#endif
 
-    audioPlayer_.init(48000, 2);
-    lastAudioTime_ = engine_.playback().currentTime();
+    refreshPlaybackSnapshot();
+    applyEditorLanguage(this);
 }
 
 MainWindow::~MainWindow() {
-    audioPlayer_.shutdown();
+    tickTimer_->stop();
+    engine_.setOnProjectChanged({});engine_.setOnTimelineChanged({});engine_.setOnSelectionChanged({});
+    engine_.playback().setOnPlayStateChanged({});engine_.playback().setOnTimeChanged({});engine_.playback().setOnSeek({});
     Theme::instance().removeListener("MainWindow");
 }
 
@@ -78,17 +112,27 @@ void MainWindow::setupUi() {
     header_->setObjectName("editorHeader");
     connect(header_, &EditorHeader::exportClicked, this, &MainWindow::onExportRequested);
     connect(header_, &EditorHeader::themeToggleClicked, this, &MainWindow::onThemeToggleRequested);
+    connect(header_, &EditorHeader::openProjectRequested, this, &MainWindow::onOpenProject);
+    connect(header_, &EditorHeader::saveProjectRequested, this, &MainWindow::onSaveProject);
+    connect(header_, &EditorHeader::projectsHubRequested, this, &MainWindow::onOpenProjectsHub);
     rootLayout->addWidget(header_);
 
-    // 2. Main vertical splitter (Top: Panels, Bottom: Timeline)
-    verticalSplitter_ = new QSplitter(Qt::Vertical, centralWidget);
+    // 2. Main vertical splitter (Top: Panels, Bottom: Timeline) inside an editor body container
+    auto* editorBody = new QWidget(centralWidget);
+    editorBody->setObjectName("editorBody");
+    editorBody->setAttribute(Qt::WA_StyledBackground, true);
+    auto* bodyLayout = new QVBoxLayout(editorBody);
+    bodyLayout->setContentsMargins(Metrics::editorMarginLeft, 0, Metrics::editorMarginRight, Metrics::editorMarginBottom);
+    bodyLayout->setSpacing(0);
+
+    verticalSplitter_ = new EditorSplitter(Qt::Vertical, editorBody);
     verticalSplitter_->setObjectName("verticalSplitter");
-    verticalSplitter_->setHandleWidth(3);
+    verticalSplitter_->setHandleWidth(Metrics::splitterGap);
 
     // 3. Top horizontal splitter (Assets, Preview, Properties)
-    horizontalSplitter_ = new QSplitter(Qt::Horizontal, verticalSplitter_);
+    horizontalSplitter_ = new EditorSplitter(Qt::Horizontal, verticalSplitter_);
     horizontalSplitter_->setObjectName("horizontalSplitter");
-    horizontalSplitter_->setHandleWidth(3);
+    horizontalSplitter_->setHandleWidth(Metrics::splitterGap);
 
     assetsPanel_ = new AssetsPanel(engine_, mediaLibrary_, horizontalSplitter_);
     assetsPanel_->setObjectName("assetsPanel");
@@ -113,121 +157,109 @@ void MainWindow::setupUi() {
     horizontalSplitter_->setCollapsible(1, false);
     horizontalSplitter_->setCollapsible(2, false);
 
-    // Initial sizes (340px Assets, 780px Preview, 320px Properties)
-    horizontalSplitter_->setSizes({340, 780, 320});
+    // Initial sizes matching 1.png (470px Assets, 940px Preview, 470px Properties)
+    horizontalSplitter_->setSizes({470, 940, 470});
 
     // Set horizontal proportions (25% Assets, 50% Preview, 25% Properties)
-    horizontalSplitter_->setStretchFactor(0, 25);
-    horizontalSplitter_->setStretchFactor(1, 50);
-    horizontalSplitter_->setStretchFactor(2, 25);
+    horizontalSplitter_->setStretchFactor(0, 1);
+    horizontalSplitter_->setStretchFactor(1, 1);
+    horizontalSplitter_->setStretchFactor(2, 1);
 
     verticalSplitter_->addWidget(horizontalSplitter_);
 
     // 4. Bottom Timeline
     timelinePanel_ = new TimelinePanel(engine_, mediaLibrary_, verticalSplitter_);
+    connect(timelinePanel_, &TimelinePanel::mediaRevealRequested, assetsPanel_, &AssetsPanel::revealMedia);
     timelinePanel_->setObjectName("timelinePanel");
     timelinePanel_->setProperty("class", "Panel");
     timelinePanel_->setMinimumHeight(180);
     connect(timelinePanel_, &TimelinePanel::clipSelected, [this](core::ClipId /* id */) {
         propertiesPanel_->refresh();
+        applyEditorLanguage(this);
     });
 
     verticalSplitter_->addWidget(timelinePanel_);
     verticalSplitter_->setCollapsible(0, false);
     verticalSplitter_->setCollapsible(1, false);
 
-    // Initial sizes (580px Panels, 320px Timeline)
-    verticalSplitter_->setSizes({580, 320});
+    // Initial sizes matching 1.png (448px Panels, 436px Timeline)
+    verticalSplitter_->setSizes({440, 440});
 
-    // Proportions (65% Panels, 35% Timeline)
-    verticalSplitter_->setStretchFactor(0, 65);
-    verticalSplitter_->setStretchFactor(1, 35);
+    // Proportions (51% Panels, 49% Timeline)
+    verticalSplitter_->setStretchFactor(0, 1);
+    verticalSplitter_->setStretchFactor(1, 1);
 
-    rootLayout->addWidget(verticalSplitter_, 1);
+    bodyLayout->addWidget(verticalSplitter_, 1);
+    rootLayout->addWidget(editorBody, 1);
 }
 
 void MainWindow::setupEngineCallbacks() {
     engine_.setOnProjectChanged([this]() {
-        audioPlayer_.reset();
-        lastAudioTime_ = engine_.playback().currentTime();
+        refreshPlaybackSnapshot();
         header_->refresh();
+        assetsPanel_->refresh();
+        previewPanel_->markFrameDirty(); // invalidate frame cache on project change
         previewPanel_->refresh();
         timelinePanel_->refresh();
         propertiesPanel_->refresh();
+        applyEditorLanguage(this);
     });
 
     engine_.setOnTimelineChanged([this]() {
-        audioPlayer_.reset();
-        lastAudioTime_ = engine_.playback().currentTime();
+        refreshPlaybackSnapshot();
+        previewPanel_->markFrameDirty(); // invalidate frame cache when clips change
         previewPanel_->refresh();
         timelinePanel_->refresh();
+        propertiesPanel_->refresh();
+        applyEditorLanguage(this);
     });
 
     engine_.setOnSelectionChanged([this]() {
         propertiesPanel_->refresh();
         timelinePanel_->refresh();
+        applyEditorLanguage(this);
     });
 
     engine_.playback().setOnPlayStateChanged([this](bool playing) {
-        if (!playing) {
-            audioPlayer_.reset();
-        }
-        lastAudioTime_ = engine_.playback().currentTime();
+        audioSession_.setState(playbackSnapshot_,engine_.playback().currentTime(),playing&&engine_.playback().playbackRate()==1.);
+        if(auto* preview=previewPanel_->findChild<PreviewWidget*>())preview->invalidateSeek();
+        previewPanel_->refresh();
     });
 
-    engine_.playback().setOnTimeChanged([this](core::TimelineTime t) {
-        if (!engine_.playback().isPlaying()) {
-            audioPlayer_.reset();
-            lastAudioTime_ = t;
-        }
+    engine_.playback().setOnSeek([this](core::TimelineTime t) {
+        audioSession_.setState(playbackSnapshot_,t,engine_.playback().isPlaying()&&engine_.playback().playbackRate()==1.);
+        if(auto* preview=previewPanel_->findChild<PreviewWidget*>())preview->invalidateSeek();
+        previewPanel_->updateFrame();
+        timelinePanel_->revealPlayhead();timelinePanel_->updatePlaybackPosition();
     });
+}
+
+void MainWindow::refreshPlaybackSnapshot() {
+    playbackSnapshot_=std::make_shared<media::PlaybackSnapshot>(engine_.project(),mediaLibrary_);
+    audioSession_.setState(playbackSnapshot_,engine_.playback().currentTime(),engine_.playback().isPlaying()&&engine_.playback().playbackRate()==1.);
 }
 
 void MainWindow::onAppTick() {
     if (engine_.playback().isPlaying()) {
+        // Buffering does not block the UI and does not let video race ahead.
+        if(audioSession_.preparing())engine_.playback().synchronizePosition(audioSession_.requestedPosition());
+        else if(auto position=audioSession_.audiblePosition()) {
+#if defined(__EMSCRIPTEN__)
+            // WebAudio packet-ended callbacks arrive in browser event batches.
+            // Re-seeking to an unchanged packet position each GUI tick freezes
+            // the video clock between batches. Extrapolate between anchors and
+            // correct larger drift, keeping video/audio within 100 ms.
+            if(std::abs((engine_.playback().currentTime()-*position).toSeconds())>.1)
+                engine_.playback().synchronizePosition(*position);
+#else
+            engine_.playback().synchronizePosition(*position);
+#endif
+        }
         engine_.update();
-        previewPanel_->refresh();
-        timelinePanel_->refresh();
-
-        // Audio playback synchronization
-        auto* tl = engine_.activeTimeline();
-        if (tl) {
-            core::TimelineTime curTime = engine_.playback().currentTime();
-            // If audio drift is detected (e.g. after jump or start)
-            if (lastAudioTime_ < curTime - core::TimelineTime::fromSeconds(0.2) ||
-                lastAudioTime_ > curTime + core::TimelineTime::fromSeconds(0.5)) {
-                audioPlayer_.reset();
-                lastAudioTime_ = curTime;
-            }
-
-            // Keep buffer filled ~120ms ahead
-            while (audioPlayer_.queuedMilliseconds() < 120) {
-                const double sliceSec = 0.05; // 50ms chunks
-                core::TimelineTime sliceDur = core::TimelineTime::fromSeconds(sliceSec);
-                if (lastAudioTime_ >= engine_.project().totalDuration()) {
-                    break;
-                }
-
-                auto slice = audioPlaybackEngine_.renderAudioSlice(
-                    *tl,
-                    lastAudioTime_,
-                    sliceDur,
-                    48000,
-                    &mediaLibrary_
-                );
-
-                if (!slice.samples().empty()) {
-                    audioPlayer_.writeSamples(slice.samples().data(), slice.samples().size());
-                }
-                lastAudioTime_ = lastAudioTime_ + sliceDur;
-            }
-        }
-    } else {
-        if (audioPlayer_.queuedMilliseconds() > 0) {
-            audioPlayer_.reset();
-        }
-        lastAudioTime_ = engine_.playback().currentTime();
     }
+    // Also schedule paused seeks/edits; paintEvent only blits a ready image.
+    previewPanel_->updateFrame();
+    timelinePanel_->updatePlaybackPosition();
 }
 
 void MainWindow::onExportRequested() {
@@ -245,13 +277,67 @@ void MainWindow::onThemeToggleRequested() {
     cfg.save();
 }
 
+void MainWindow::onOpenProject() {
+    QString path = QFileDialog::getOpenFileName(this, "Open Catchim Project", "", "Catchim Project (*.json *.catchim);;All Files (*.*)");
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QByteArray fileData = file.readAll();
+        if (engine_.loadProjectFromJson(fileData.toStdString())) {
+            engine_.notifyProjectChanged();
+        }
+    }
+}
+
+void MainWindow::onSaveProject() {
+    QString defaultName = QString::fromStdString(engine_.project().name()) + ".json";
+    QString path = QFileDialog::getSaveFileName(this, "Save Catchim Project", defaultName, "Catchim Project (*.json);;All Files (*.*)");
+    if (path.isEmpty()) return;
+
+    std::string jsonStr = engine_.saveProjectToJson();
+    QFile file(path);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        file.write(jsonStr.data(), jsonStr.size());
+        file.close();
+    }
+}
+
+void MainWindow::onOpenProjectsHub() {
+    ProjectsHubDialog dlg(this);
+    connect(&dlg, &ProjectsHubDialog::projectSelected, [this](const QString& filePath) {
+        QFile file(filePath);
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QByteArray data = file.readAll();
+            if (engine_.loadProjectFromJson(data.toStdString())) {
+                engine_.notifyProjectChanged();
+            }
+        }
+    });
+    dlg.exec();
+}
+
 void MainWindow::keyPressEvent(QKeyEvent* event) {
+    // Project Save / Open shortcuts
+    if (event->key() == Qt::Key_O && (event->modifiers() & Qt::ControlModifier) && (event->modifiers() & Qt::ShiftModifier)) {
+        onOpenProjectsHub();
+        event->accept();
+        return;
+    }
+    if (event->key() == Qt::Key_S && (event->modifiers() & Qt::ControlModifier)) {
+        onSaveProject();
+        event->accept();
+        return;
+    }
+    if (event->key() == Qt::Key_O && (event->modifiers() & Qt::ControlModifier)) {
+        onOpenProject();
+        event->accept();
+        return;
+    }
+
     // 1. Playback & Navigation
     if (event->key() == Qt::Key_Space) {
         engine_.togglePlay();
-        if (!engine_.playback().isPlaying()) {
-            audioPlayer_.reset();
-        }
         previewPanel_->refresh();
         event->accept();
         return;
@@ -420,6 +506,11 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
     }
 
     QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event) {
+    QMainWindow::resizeEvent(event);
+    // QSplitter retains the user's panel proportions while the window resizes.
 }
 
 } // namespace catchim::ui

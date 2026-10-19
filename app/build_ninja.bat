@@ -17,8 +17,26 @@ if errorlevel 1 exit /b 1
 
 echo === Deploying Qt Runtime DLLs ===
 if exist "%QT_DIR%\bin\windeployqt.exe" (
-    "%QT_DIR%\bin\windeployqt.exe" --no-translations --compiler-runtime .\build\bin\catchim_app.exe
+    if exist ".\build\bin\Catchim.exe" (
+        "%QT_DIR%\bin\windeployqt.exe" --compiler-runtime .\build\bin\Catchim.exe
+    ) else if exist ".\build\bin\catchim_app.exe" (
+        "%QT_DIR%\bin\windeployqt.exe" --compiler-runtime .\build\bin\catchim_app.exe
+    )
+)
+
+echo === Copying to Root Catchim.exe and Dependencies ===
+if exist ".\build\bin\Catchim.exe" (
+    taskkill /F /IM Catchim.exe >nul 2>&1
+    copy /Y ".\build\bin\Catchim.exe" "..\Catchim.exe"
+    copy /Y ".\build\bin\*.dll" "..\"
+    if exist ".\build\bin\platforms" xcopy /E /I /Y ".\build\bin\platforms" "..\platforms"
+    if exist ".\build\bin\styles" xcopy /E /I /Y ".\build\bin\styles" "..\styles"
+    if exist ".\build\bin\imageformats" xcopy /E /I /Y ".\build\bin\imageformats" "..\imageformats"
+    if exist ".\build\bin\iconengines" xcopy /E /I /Y ".\build\bin\iconengines" "..\iconengines"
+    if exist ".\icons" xcopy /E /I /Y ".\icons" ".\build\bin\icons"
+    if exist ".\icons" xcopy /E /I /Y ".\icons" "..\icons"
 )
 
 echo === Running Parity Tests ===
 .\build\bin\catchim_tests.exe
+

@@ -1,0 +1,44 @@
+[
+  {
+    "level": "info",
+    "message": "CATCHIM_PERFORMANCE {\"seconds\":10.011,\"uiRafHz\":60,\"rafP95Ms\":16.73,\"inputToRafP95Ms\":0,\"inputSamples\":0,\"previewSubmissionsHz\":59.9,\"videoDecodedHz\":30,\"videoDropped\":0,\"longTasks\":0,\"backend\":\"webgpu\"}",
+    "timestamp": "2026-10-19T13:30:40.405Z",
+    "url": "http://127.0.0.1:8766/assets/index-Dw3avbEP.js"
+  },
+  {
+    "level": "info",
+    "message": "CATCHIM_PERFORMANCE {\"seconds\":10.012,\"uiRafHz\":60,\"rafP95Ms\":16.73,\"inputToRafP95Ms\":2.08,\"inputSamples\":10,\"previewSubmissionsHz\":0.7,\"videoDecodedHz\":2.1,\"videoDropped\":0,\"longTasks\":0,\"backend\":\"webgpu\"}",
+    "timestamp": "2026-10-19T13:31:23.118Z",
+    "url": "http://127.0.0.1:8766/assets/index-Dw3avbEP.js"
+  },
+  {
+    "level": "info",
+    "message": "CATCHIM_PERFORMANCE {\"seconds\":10.01,\"uiRafHz\":60,\"rafP95Ms\":16.72,\"inputToRafP95Ms\":0,\"inputSamples\":0,\"previewSubmissionsHz\":0.1,\"videoDecodedHz\":0,\"videoDropped\":0,\"longTasks\":0,\"backend\":\"webgpu\"}",
+    "timestamp": "2026-10-19T13:31:50.636Z",
+    "url": "http://127.0.0.1:8766/assets/index-Dw3avbEP.js"
+  },
+  {
+    "level": "info",
+    "message": "CATCHIM_PERFORMANCE {\"seconds\":10.011,\"uiRafHz\":60,\"rafP95Ms\":16.74,\"inputToRafP95Ms\":0,\"inputSamples\":0,\"previewSubmissionsHz\":59.9,\"videoDecodedHz\":59.8,\"videoDropped\":0,\"longTasks\":0,\"backend\":\"webgpu\"}",
+    "timestamp": "2026-10-19T13:34:49.767Z",
+    "url": "http://127.0.0.1:8766/assets/index-Dw3avbEP.js"
+  },
+  {
+    "level": "info",
+    "message": "CATCHIM_PERFORMANCE {\"seconds\":10.003,\"uiRafHz\":60.1,\"rafP95Ms\":16.73,\"inputToRafP95Ms\":0,\"inputSamples\":0,\"previewSubmissionsHz\":60,\"playheadMovesHz\":60.1,\"videoDecodedHz\":30,\"videoDropped\":0,\"longTasks\":0,\"backend\":\"webgpu\"}",
+    "timestamp": "2026-10-19T13:47:55.729Z",
+    "url": "http://127.0.0.1:8766/assets/index-nzPB_Ae7.js"
+  },
+  {
+    "level": "info",
+    "message": "CATCHIM_PERFORMANCE {\"seconds\":10,\"uiRafHz\":60.1,\"rafP95Ms\":16.73,\"inputToRafP95Ms\":9.64,\"inputSamples\":10,\"previewSubmissionsHz\":60,\"playheadMovesHz\":60.1,\"videoDecodedHz\":60,\"videoDropped\":0,\"longTasks\":0,\"backend\":\"webgpu\"}",
+    "timestamp": "2026-10-19T13:50:17.111Z",
+    "url": "http://127.0.0.1:8766/assets/index-nzPB_Ae7.js"
+  },
+  {
+    "level": "info",
+    "message": "CATCHIM_PERFORMANCE {\"seconds\":10.001,\"uiRafHz\":60.1,\"rafP95Ms\":16.72,\"inputToRafP95Ms\":-0.73,\"inputSamples\":2,\"previewSubmissionsHz\":0,\"playheadMovesHz\":0.3,\"videoDecodedHz\":0,\"videoDropped\":0,\"longTasks\":0,\"backend\":\"webgpu\"}",
+    "timestamp": "2026-10-19T13:51:07.076Z",
+    "url": "http://127.0.0.1:8766/assets/index-nzPB_Ae7.js"
+  }
+]

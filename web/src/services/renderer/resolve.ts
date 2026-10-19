@@ -20,6 +20,7 @@ import {
 import { resolveColorAtTime, resolveOpacityAtTime } from "@/animation/values";
 import { resolveTransformAtTime } from "@/rendering/animation-values";
 import { videoCache } from "@/services/video-cache/service";
+import { previewVideoPool } from "@/services/video-cache/preview-video";
 import type { CanvasRenderer } from "./canvas-renderer";
 import type { AnyBaseNode } from "./nodes/base-node";
 import {
@@ -202,6 +203,29 @@ async function resolveVideoNode({
 			clipTime,
 			retime: node.params.retime,
 		});
+  if (
+    context.renderer.isPreview &&
+    (node.params.retime?.rate ?? 1) > 0 &&
+    !previewVideoPool.isKnownUnsupported(node.params.file)
+  ) {
+    try {
+      const source = await previewVideoPool.get({
+        key: node.params.previewKey ?? node.params.mediaId,
+        file: node.params.file,
+        time: mediaTimeToSeconds({ time: roundMediaTime({ time: sourceTimeTicks }) }),
+        playing: context.renderer.playing,
+        rate: node.params.retime?.rate ?? 1,
+      });
+      const state = resolveVisualState({ params: node.params, context, sourceWidth: source.videoWidth, sourceHeight: source.videoHeight });
+      return state ? { ...state, source, sourceWidth: source.videoWidth, sourceHeight: source.videoHeight } : null;
+    } catch (error) {
+      // Native HTML video is the low-latency path, but it cannot decode every
+      // codec supported by the export/WebCodecs path. Remember the failure so
+      // a drag or seek does not retry a broken native decoder on every frame.
+      previewVideoPool.markUnsupported(node.params.file);
+      console.warn("Native preview decoder unavailable; using WebCodecs fallback", error);
+    }
+	}
 	const frame = await videoCache.getFrameAt({
 		mediaId: node.params.mediaId,
 		file: node.params.file,

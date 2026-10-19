@@ -65,6 +65,10 @@ bool UpdateElementsCommand::execute() {
             continue;
         }
 
+        if (entry.muted) clip->setMuted(*entry.muted);
+        if (entry.hidden) clip->setHidden(*entry.hidden);
+        if (entry.name) clip->setName(*entry.name);
+
         if (entry.patchParams.is_object()) {
             for (const auto& [key, value] : entry.patchParams.items()) {
                 clip->params()[key] = value;

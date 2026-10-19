@@ -56,7 +56,7 @@ export function HandleButton({
 			onPointerDown={onPointerDown}
 			onPointerMove={onPointerMove}
 			onPointerUp={onPointerUp}
-			onPointerLeave={onPointerUp}
+			onPointerCancel={onPointerUp}
 			onKeyDown={(event) => event.key === "Enter" && event.preventDefault()}
 			onKeyUp={(event) => event.key === "Enter" && event.preventDefault()}
 		>

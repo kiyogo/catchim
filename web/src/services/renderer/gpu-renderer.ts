@@ -4,6 +4,7 @@ import {
 	initializeGpu,
 } from "opencut-wasm";
 import type { EffectPass, EffectUniformValue } from "@/effects/types";
+import { webGpuEngine } from "@/native/webgpu-engine";
 
 let gpuAvailable = false;
 let initPromise: Promise<void> | null = null;
@@ -12,7 +13,7 @@ export function initializeGpuRenderer(): Promise<void> {
 	if (!initPromise) {
 		initPromise = initializeGpu()
 			.then(() => {
-				gpuAvailable = true;
+				gpuAvailable = webGpuEngine.isAvailable;
 			})
 			.catch((error: unknown) => {
 				gpuAvailable = false;

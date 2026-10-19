@@ -1,13 +1,13 @@
-import { type JSX } from "react";
+"use client";
+
+import { useEffect, useRef } from "react";
 import { BASE_TIMELINE_PIXELS_PER_SECOND } from "@/timeline/scale";
 import { mediaTimeToSeconds } from "opencut-wasm";
-import { TICKS_PER_SECOND } from "@/wasm";
 import { TIMELINE_RULER_HEIGHT_PX } from "./layout";
 import { DEFAULT_FPS } from "@/fps/defaults";
 import { useEditor } from "@/editor/use-editor";
-import { getRulerConfig, shouldShowLabel } from "@/timeline/ruler-utils";
+import { getRulerConfig, shouldShowLabel, formatRulerLabel } from "@/timeline/ruler-utils";
 import { useScrollPosition } from "@/timeline/hooks/use-scroll-position";
-import { TimelineTick } from "./timeline-tick";
 import { useTranslation } from "@/i18n";
 
 interface TimelineRulerProps {
@@ -32,6 +32,7 @@ export function TimelineRuler({
 	handleRulerMouseDown,
 }: TimelineRulerProps) {
 	const { t } = useTranslation();
+	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const durationTicks = useEditor((e) => e.timeline.getTotalDuration());
 	const durationSeconds = mediaTimeToSeconds({ time: durationTicks });
 	const pixelsPerSecond = BASE_TIMELINE_PIXELS_PER_SECOND * zoomLevel;
@@ -46,58 +47,93 @@ export function TimelineRuler({
 		zoomLevel,
 		fps,
 	});
-	const tickCount =
-		Math.ceil(effectiveDurationSeconds / tickIntervalSeconds) + 1;
 
 	const { scrollLeft, viewportWidth } = useScrollPosition({
 		scrollRef: tracksScrollRef,
 	});
 
-	// Keep extra buffer because zoom layout and scroll position can briefly
-	// settle on different frames.
-	const bufferPx = Math.max(200, (scrollLeft + viewportWidth) * 0.15);
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
 
-	const visibleStartTimeSeconds = Math.max(
-		0,
-		(scrollLeft - bufferPx) / pixelsPerSecond,
-	);
-	const visibleEndTimeSeconds =
-		(scrollLeft + viewportWidth + bufferPx) / pixelsPerSecond;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
 
-	const startTickIndex = Math.max(
-		0,
-		Math.floor(visibleStartTimeSeconds / tickIntervalSeconds),
-	);
-	const endTickIndex = Math.min(
-		tickCount - 1,
-		Math.ceil(visibleEndTimeSeconds / tickIntervalSeconds),
-	);
+		const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+		const width = dynamicTimelineWidth;
+		const height = TIMELINE_RULER_HEIGHT_PX;
 
-	const timelineTicks: Array<JSX.Element> = [];
-	for (
-		let tickIndex = startTickIndex;
-		tickIndex <= endTickIndex;
-		tickIndex += 1
-	) {
-		const timeSeconds = tickIndex * tickIntervalSeconds;
-		if (timeSeconds > effectiveDurationSeconds) break;
+		if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+			canvas.width = Math.round(width * dpr);
+			canvas.height = Math.round(height * dpr);
+		}
 
-		const timeTicks = Math.round(timeSeconds * TICKS_PER_SECOND);
-		const showLabel = shouldShowLabel({
-			time: timeSeconds,
-			labelIntervalSeconds,
-		});
-		timelineTicks.push(
-			<TimelineTick
-				key={tickIndex}
-				time={timeTicks}
-				timeInSeconds={timeSeconds}
-				zoomLevel={zoomLevel}
-				fps={fps}
-				showLabel={showLabel}
-			/>,
+		ctx.save();
+		ctx.scale(dpr, dpr);
+		ctx.clearRect(0, 0, width, height);
+
+		const bufferPx = Math.max(200, (scrollLeft + viewportWidth) * 0.15);
+		const visibleStartTimeSeconds = Math.max(
+			0,
+			(scrollLeft - bufferPx) / pixelsPerSecond,
 		);
-	}
+		const visibleEndTimeSeconds =
+			(scrollLeft + viewportWidth + bufferPx) / pixelsPerSecond;
+
+		const tickCount =
+			Math.ceil(effectiveDurationSeconds / tickIntervalSeconds) + 1;
+		const startTickIndex = Math.max(
+			0,
+			Math.floor(visibleStartTimeSeconds / tickIntervalSeconds),
+		);
+		const endTickIndex = Math.min(
+			tickCount - 1,
+			Math.ceil(visibleEndTimeSeconds / tickIntervalSeconds),
+		);
+
+		ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+		ctx.textBaseline = "top";
+		ctx.textAlign = "left";
+
+		ctx.fillStyle = "rgba(161, 161, 170, 0.85)";
+		ctx.strokeStyle = "rgba(161, 161, 170, 0.25)";
+		ctx.lineWidth = 1;
+
+		ctx.beginPath();
+		for (let i = startTickIndex; i <= endTickIndex; i++) {
+			const timeSec = i * tickIntervalSeconds;
+			if (timeSec > effectiveDurationSeconds) break;
+
+			const x = Math.round(timeSec * pixelsPerSecond) + 0.5;
+			const showLabel = shouldShowLabel({
+				time: timeSec,
+				labelIntervalSeconds,
+			});
+
+			if (showLabel) {
+				const label = formatRulerLabel({ timeInSeconds: timeSec, fps });
+				ctx.fillText(label, x + 2, 4);
+				ctx.moveTo(x, 0);
+				ctx.lineTo(x, 18);
+			} else {
+				ctx.moveTo(x, 6);
+				ctx.lineTo(x, 12);
+			}
+		}
+		ctx.stroke();
+
+		ctx.restore();
+	}, [
+		dynamicTimelineWidth,
+		effectiveDurationSeconds,
+		fps,
+		labelIntervalSeconds,
+		pixelsPerSecond,
+		scrollLeft,
+		tickIntervalSeconds,
+		viewportWidth,
+		zoomLevel,
+	]);
 
 	return (
 		<div
@@ -111,8 +147,6 @@ export function TimelineRuler({
 			style={{ height: TIMELINE_RULER_HEIGHT_PX }}
 			onWheel={handleWheel}
 			onClick={(event) => {
-				// Ruler seek already happens on mousedown via playhead scrubbing.
-				// Forwarding the follow-up click re-enters the selection-clearing path.
 				if (event.target === event.currentTarget) {
 					handleTimelineContentClick(event);
 				}
@@ -130,7 +164,15 @@ export function TimelineRuler({
 				}}
 				onMouseDown={handleRulerMouseDown}
 			>
-				{timelineTicks}
+				<canvas
+					ref={canvasRef}
+					data-engine="canvas-ruler"
+					style={{
+						width: `${dynamicTimelineWidth}px`,
+						height: `${TIMELINE_RULER_HEIGHT_PX}px`,
+						display: "block",
+					}}
+				/>
 			</div>
 		</div>
 	);

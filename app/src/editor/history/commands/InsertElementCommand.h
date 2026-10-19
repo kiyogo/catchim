@@ -11,7 +11,8 @@ namespace catchim::editor {
 struct InsertElementPlacement {
     enum class Mode {
         Explicit,
-        Auto
+        Auto,
+        NewTrack
     };
 
     Mode mode{Mode::Auto};
@@ -49,6 +50,7 @@ private:
 
     core::ClipId insertedClipId_;
     core::TrackId targetTrackId_{core::TrackId::empty()};
+    core::TrackId createdTrackId_{core::TrackId::empty()};
 
     std::optional<TimelineTracksSnapshot> savedState_{std::nullopt};
     std::optional<ProjectSettings> savedSettings_{std::nullopt};

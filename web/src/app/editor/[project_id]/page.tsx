@@ -14,9 +14,10 @@ import { EditorHeader } from "@/components/editor/editor-header";
 import { EditorProvider } from "@/components/providers/editor-provider";
 import { Onboarding } from "@/components/editor/onboarding";
 import { MigrationDialog } from "@/project/components/migration-dialog";
-import { usePanelStore } from "@/editor/panel-store";
+import { usePanelStore, type PanelSizes } from "@/editor/panel-store";
+import { LatestFrameTask } from "@/utils/latest-frame-task";
 import { usePasteMedia } from "@/media/use-paste-media";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useEditor } from "@/editor/use-editor";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -81,7 +82,17 @@ function DegradedRendererBanner() {
 
 function EditorLayout() {
 	usePasteMedia();
-	const { panels, setPanel } = usePanelStore();
+	// Panel layout is handled by the resizable DOM containers. Persist it once
+	// per display frame without rerendering every editor panel on pointermove.
+	const [panels] = useState(() => usePanelStore.getState().panels);
+	const pendingLayout = useRef<Partial<PanelSizes>>({});
+	const [layoutUpdates] = useState(() => new LatestFrameTask<Partial<PanelSizes>>(sizes => {
+		usePanelStore.getState().setPanels(sizes); pendingLayout.current = {};
+	}));
+	const queueLayout = (sizes: Partial<PanelSizes>) => {
+		Object.assign(pendingLayout.current, sizes); layoutUpdates.schedule({ ...pendingLayout.current });
+	};
+	useEffect(() => () => layoutUpdates.flush(), [layoutUpdates]);
 	const isMobile = useIsMobileEditor();
 	const activeScene = useEditor((editor) =>
 		editor.scenes.getActiveSceneOrNull(),
@@ -142,14 +153,7 @@ function EditorLayout() {
 			direction="vertical"
 			className="size-full gap-[0.18rem]"
 			onLayout={(sizes) => {
-				setPanel({
-					panel: "mainContent",
-					size: sizes[0] ?? panels.mainContent,
-				});
-				setPanel({
-					panel: "timeline",
-					size: sizes[1] ?? panels.timeline,
-				});
+				queueLayout({ mainContent: sizes[0] ?? panels.mainContent, timeline: sizes[1] ?? panels.timeline });
 			}}
 		>
 			<ResizablePanel
@@ -162,12 +166,7 @@ function EditorLayout() {
 					direction="horizontal"
 					className="size-full gap-[0.19rem] px-3"
 					onLayout={(sizes) => {
-						setPanel({ panel: "tools", size: sizes[0] ?? panels.tools });
-						setPanel({ panel: "preview", size: sizes[1] ?? panels.preview });
-						setPanel({
-							panel: "properties",
-							size: sizes[2] ?? panels.properties,
-						});
+						queueLayout({ tools: sizes[0] ?? panels.tools, preview: sizes[1] ?? panels.preview, properties: sizes[2] ?? panels.properties });
 					}}
 				>
 					<ResizablePanel

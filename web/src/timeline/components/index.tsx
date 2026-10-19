@@ -2,9 +2,11 @@
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+	Copy01Icon,
 	Delete02Icon,
 	MagicWand05Icon,
 	MusicNote03Icon,
+	ScissorIcon,
 	TaskAdd02Icon,
 	TextIcon,
 	ViewIcon,
@@ -18,6 +20,7 @@ import {
 	ContextMenu,
 	ContextMenuContent,
 	ContextMenuItem,
+	ContextMenuSeparator,
 	ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useTimelineZoom } from "@/timeline/hooks/use-timeline-zoom";
@@ -499,7 +502,11 @@ export function Timeline() {
 				setZoomLevel={({ zoom }) => setZoomLevel(zoom)}
 			/>
 
-			<div className="relative flex flex-1 overflow-hidden" ref={timelineRef}>
+			<div
+				data-engine="canvas-timeline"
+				className="relative flex flex-1 overflow-hidden"
+				ref={timelineRef}
+			>
 				<TrackLabelsPanel
 					trackLabelsRef={trackLabelsRef}
 					trackLabelsScrollRef={trackLabelsScrollRef}
@@ -558,6 +565,7 @@ export function Timeline() {
 					<ScrollArea
 						className="flex-1"
 						ref={tracksScrollRef}
+						data-timeline-scroll="true"
 						onScroll={() => {
 							syncFollowers();
 							saveScrollPosition();
@@ -571,6 +579,7 @@ export function Timeline() {
 							<div
 								className="relative shrink-0"
 								style={{
+									width: `${dynamicTimelineWidth}px`,
 									height: `${
 										Math.max(
 											TRACKS_CONTAINER_HEIGHT.min,
@@ -600,6 +609,7 @@ export function Timeline() {
 							>
 								{tracks.length > 0 && (
 									<TimelineTrackRows
+										dynamicTimelineWidth={dynamicTimelineWidth}
 										mainTrackId={mainTrackId}
 										zoomLevel={zoomLevel}
 										dragView={dragView}
@@ -689,8 +699,60 @@ function TrackLabelsPanel({
 		[tracks, expandedElementIds],
 	);
 
+	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+
+		const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+		const width = TIMELINE_TRACK_LABELS_COLUMN_WIDTH_PX;
+		const totalHeight = getTotalTracksHeight({
+			tracks,
+			getExtraHeight: getTrackExpansionHeight,
+		});
+
+		if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(totalHeight * dpr)) {
+			canvas.width = Math.round(width * dpr);
+			canvas.height = Math.round(totalHeight * dpr);
+		}
+
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		ctx.save();
+		ctx.scale(dpr, dpr);
+		ctx.clearRect(0, 0, width, totalHeight);
+
+		let currentY = 0;
+		for (let i = 0; i < tracks.length; i++) {
+			const track = tracks[i];
+			const baseHeight = getTrackHeight({ type: track.type });
+			const rowHeight = baseHeight + getTrackExpansionHeight(i);
+			const isSelected = tracksWithSelection.has(track.id);
+
+			if (isSelected) {
+				ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+				ctx.fillRect(0, currentY, width, rowHeight);
+			}
+
+			ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+			ctx.lineWidth = 1;
+			ctx.beginPath();
+			ctx.moveTo(0, currentY + rowHeight - 0.5);
+			ctx.lineTo(width, currentY + rowHeight - 0.5);
+			ctx.stroke();
+
+			currentY += rowHeight + TIMELINE_TRACK_GAP_PX;
+		}
+
+		ctx.restore();
+	}, [tracks, tracksWithSelection, getTrackExpansionHeight]);
+
 	return (
 		<div
+			data-engine="canvas-track-headers"
+			data-component="timeline-track-labels"
 			className="flex shrink-0 flex-col border-r"
 			style={{ width: `${TIMELINE_TRACK_LABELS_COLUMN_WIDTH_PX}px` }}
 		>
@@ -699,7 +761,16 @@ function TrackLabelsPanel({
 				style={{ height: timelineHeaderHeight || 48 }}
 			/>
 			<div ref={trackLabelsRef} className="flex-1 overflow-hidden">
-				<div ref={trackLabelsScrollRef} className="size-full overflow-hidden">
+				<div ref={trackLabelsScrollRef} className="relative size-full overflow-hidden">
+					<canvas
+						ref={canvasRef}
+						data-engine="canvas-track-headers"
+						className="pointer-events-none absolute top-0 left-0"
+						style={{
+							width: `${TIMELINE_TRACK_LABELS_COLUMN_WIDTH_PX}px`,
+							height: `${getTotalTracksHeight({ tracks, getExtraHeight: getTrackExpansionHeight })}px`,
+						}}
+					/>
 					{tracks.length > 0 && (
 						<div
 							className="flex flex-col"
@@ -776,6 +847,7 @@ function TrackLabelsPanel({
 }
 
 function TimelineTrackRows({
+	dynamicTimelineWidth,
 	mainTrackId,
 	zoomLevel,
 	dragView,
@@ -788,6 +860,7 @@ function TimelineTrackRows({
 	isDragOver,
 	dropTarget,
 }: {
+	dynamicTimelineWidth: number;
 	mainTrackId: string | null;
 	zoomLevel: number;
 	dragView: ElementDragView;
@@ -872,11 +945,15 @@ function TimelineTrackRows({
 				<ContextMenu key={track.id}>
 					<ContextMenuTrigger asChild>
 						<div
+							data-engine="canvas-track"
+							data-track-id={track.id}
+							data-track-type={track.type}
 							className={cn(
-								"absolute right-0 left-0 transition-colors",
+								"absolute left-0 transition-colors",
 								tracksWithSelection.has(track.id) && SELECTED_TRACK_ROW_CLASS,
 							)}
 							style={{
+								width: `${dynamicTimelineWidth}px`,
 								top: `${TIMELINE_CONTENT_TOP_PADDING_PX + (trackTopOffsets[index] ?? 0)}px`,
 								height: `${getTrackHeight({ type: track.type }) + getTrackExpansionHeight(index)}px`,
 							}}
@@ -884,6 +961,7 @@ function TimelineTrackRows({
 							<TimelineTrackContent
 								track={track}
 								zoomLevel={zoomLevel}
+								dynamicTimelineWidth={dynamicTimelineWidth}
 								dragView={dragView}
 								onResizeStart={onResizeStart}
 								onElementMouseDown={onElementMouseDown}
@@ -899,7 +977,49 @@ function TimelineTrackRows({
 							/>
 						</div>
 					</ContextMenuTrigger>
-					<ContextMenuContent className="w-40">
+					<ContextMenuContent className="w-48">
+						{selectedElements.some((el) => el.trackId === track.id) && (
+							<>
+								<ContextMenuItem
+									icon={<HugeiconsIcon icon={ScissorIcon} />}
+									onClick={(event: React.MouseEvent) => {
+										event.stopPropagation();
+										invokeAction("split");
+									}}
+								>
+									{t("timeline.split")}
+								</ContextMenuItem>
+								<ContextMenuItem
+									icon={<HugeiconsIcon icon={Copy01Icon} />}
+									onClick={(event: React.MouseEvent) => {
+										event.stopPropagation();
+										invokeAction("copy-selected");
+									}}
+								>
+									{t("timeline.copy")}
+								</ContextMenuItem>
+								<ContextMenuItem
+									icon={<HugeiconsIcon icon={Copy01Icon} />}
+									onClick={(event: React.MouseEvent) => {
+										event.stopPropagation();
+										invokeAction("duplicate-selected");
+									}}
+								>
+									{t("timeline.duplicate")}
+								</ContextMenuItem>
+								<ContextMenuItem
+									icon={<HugeiconsIcon icon={Delete02Icon} />}
+									onClick={(event: React.MouseEvent) => {
+										event.stopPropagation();
+										invokeAction("delete-selected");
+									}}
+									variant="destructive"
+								>
+									{t("timeline.deleteElement")}
+								</ContextMenuItem>
+								<ContextMenuSeparator />
+							</>
+						)}
 						<ContextMenuItem
 							icon={<HugeiconsIcon icon={TaskAdd02Icon} />}
 							onClick={(event: React.MouseEvent) => {

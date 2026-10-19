@@ -4,6 +4,8 @@ import { createCanvasSurface } from "./canvas-utils";
 import { buildFrameDescriptor } from "./compositor/frame-descriptor";
 import { wasmCompositor } from "./compositor/wasm-compositor";
 import { resolveRenderTree } from "./resolve";
+import { previewVideoPool } from "@/services/video-cache/preview-video";
+import { recordPreviewSubmission } from "@/diagnostics/browser-performance";
 import {
 	measureSpanAsync,
 	measureSpanSync,
@@ -14,6 +16,7 @@ export type CanvasRendererParams = {
 	width: number;
 	height: number;
 	fps: FrameRate;
+	isPreview?: boolean;
 };
 
 export class CanvasRenderer {
@@ -22,8 +25,14 @@ export class CanvasRenderer {
 	width: number;
 	height: number;
 	fps: FrameRate;
+	isPreview: boolean;
+	playing = false;
+	private disposed = false;
+	activate() { this.disposed = false; }
+	dispose() { this.disposed = true; }
 
-	constructor({ width, height, fps }: CanvasRendererParams) {
+	constructor({ width, height, fps, isPreview = false }: CanvasRendererParams) {
+		this.isPreview = isPreview;
 		this.width = width;
 		this.height = height;
 		this.fps = fps;
@@ -51,14 +60,19 @@ export class CanvasRenderer {
 	}
 
 	async render({ node, time }: { node: AnyBaseNode; time: number }) {
+		if (this.disposed) return;
+		if (this.isPreview) previewVideoPool.beginFrame();
+		try {
 		await measureSpanAsync({
 			name: "resolve",
 			fn: () => resolveRenderTree({ node, renderer: this, time }),
 		});
+		if (this.disposed) return;
 		const { frame, textures } = await measureSpanAsync({
 			name: "buildFrame",
 			fn: () => buildFrameDescriptor({ node, renderer: this }),
 		});
+		if (this.disposed) return;
 		wasmCompositor.ensureInitialized({
 			width: this.width,
 			height: this.height,
@@ -71,6 +85,10 @@ export class CanvasRenderer {
 			name: "renderFrame",
 			fn: () => wasmCompositor.render(frame),
 		});
+		if (this.isPreview) recordPreviewSubmission();
+		} finally {
+			if (this.isPreview) previewVideoPool.endFrame();
+		}
 	}
 
 	async renderToCanvas({

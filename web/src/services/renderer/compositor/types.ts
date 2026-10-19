@@ -56,6 +56,7 @@ export type ExternalTextureDescriptor = {
 	source: CanvasImageSource;
 	width: number;
 	height: number;
+	version?: number | string;
 };
 
 /**

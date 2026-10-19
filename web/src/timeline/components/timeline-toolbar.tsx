@@ -312,6 +312,13 @@ function ToolbarRightSection({
 				/>
 			</TooltipProvider>
 
+			<span
+				className="hidden sm:inline-flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-400 border border-sky-500/20"
+				title="Canvas timeline"
+			>
+				Canvas
+			</span>
+
 			<div className="bg-border mx-1 h-6 w-px" />
 
 			<div className="flex items-center gap-1">

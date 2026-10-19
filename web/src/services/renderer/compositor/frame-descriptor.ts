@@ -240,12 +240,17 @@ async function collectVisualSourceNode({
 			: (node.resolved as ResolvedVisualSourceNodeState).sourceHeight;
 
 	const textureId = `${path}:source`;
+	const version =
+		node instanceof VideoNode
+			? (node.resolved as any)?.localTime ?? (node.resolved as any)?.timestamp
+			: undefined;
 	textures.set(textureId, {
 		kind: "external",
 		id: textureId,
 		source,
 		width: sourceWidth,
 		height: sourceHeight,
+		version,
 	});
 
 	const transform = computeVisualTransform({
