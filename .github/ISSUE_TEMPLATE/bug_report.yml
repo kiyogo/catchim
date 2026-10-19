@@ -1,0 +1,50 @@
+name: Bug Report
+description: Create a report to help us fix a problem
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue!
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Catchim did the issue occur in?
+      options:
+        - App (C++ Desktop)
+        - Web (Browser Editor)
+        - WebAssembly Engine Bridge
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Open project...
+        2. Drag media clip to timeline...
+        3. See error...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: System & Environment
+      description: OS version, browser (for Web), GPU model, etc.
+      placeholder: Windows 11, Chrome 120, NVIDIA RTX 4070
