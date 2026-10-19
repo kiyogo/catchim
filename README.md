@@ -6,6 +6,22 @@
 
 Catchim is a high-performance video editing suite consisting of two main components: a native desktop application powered by C++ that can also compile to WebAssembly, and a modern browser-based editor.
 
+## Screenshots
+
+### Catchim Desktop App
+
+<p align="center">
+  <img src="docs/images/catchim-app.png" alt="Catchim Desktop App" width="100%" />
+</p>
+
+### Catchim Web Editor
+
+Web-based video editor interface derived from OpenCut (https://github.com/OpenCut-app/OpenCut)
+
+<p align="center">
+  <img src="docs/images/catchim-web.png" alt="Catchim Web Editor" width="100%" />
+</p>
+
 ## Architecture
 
 Catchim is divided into two modules:
@@ -35,7 +51,7 @@ catchim/
 │   ├── src/           # React components, timeline, renderer, WebGPU
 │   ├── public/        # Static assets and WebAssembly binaries
 │   └── package.json   # Web dependencies & scripts
-├── docs/              # Technical specifications & architecture audits
+├── docs/              # Technical specifications, audits & screenshots
 ├── logo.svg           # Catchim vector logo
 └── LICENSE            # Project license and copyright notices
 ```
@@ -67,6 +83,13 @@ npm run dev
 ```powershell
 ./Build_Web.bat
 ```
+
+## Community and Security
+
+- [Security Policy](SECURITY.md): Vulnerability reporting procedures.
+- [Code of Conduct](CODE_OF_CONDUCT.md): Contributor Covenant pledge and standards.
+- [Contributing Guide](CONTRIBUTING.md): Setup and pull request guidelines.
+- [Support](SUPPORT.md): Help and discussions.
 
 ## License and Attribution
 
