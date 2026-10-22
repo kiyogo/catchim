@@ -54,7 +54,7 @@ import { useTranslation } from "@/i18n";
 import { useState } from "react";
 import { toast } from "sonner";
 import { createAudioContext } from "@/media/audio";
-import { detectAudioBeats } from "@/media/beat-detection";
+import { detectAudioBeatsAsync } from "@/media/beat-detection";
 import {
 	addMediaTime,
 	mediaTimeFromSeconds,
@@ -173,7 +173,7 @@ function ToolbarLeftSection() {
 				audioBuffer.duration,
 				trimStartSeconds + (element.duration / ticksPerSecond) * speed,
 			);
-			const detected = detectAudioBeats({
+			const detected = await detectAudioBeatsAsync({
 				buffer: audioBuffer,
 				startSeconds: trimStartSeconds,
 				endSeconds: trimEndSeconds,

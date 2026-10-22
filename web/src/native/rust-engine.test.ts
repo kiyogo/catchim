@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { detectAudioBeats } from "@/media/beat-detection";
+import {
+  detectAudioBeats,
+  detectAudioBeatsFromPlanarSamples,
+} from "@/media/beat-detection";
 import { initRustEngine } from "./rust-engine";
 
 function createBeatBuffer(): AudioBuffer {
@@ -87,5 +90,28 @@ describe("Rust WASM beat detection", () => {
       bindings.free(outTimesPtr);
       bindings.free(samplesPtr);
     }
+  });
+
+  test("detects beats from planar audio supplied by a worker", async () => {
+    const bindings = await initRustEngine();
+    expect(bindings?.detectAudioBeats).toBeTypeOf("function");
+
+    const buffer = createBeatBuffer();
+    const planar = new Float32Array(buffer.length * buffer.numberOfChannels);
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+      planar.set(buffer.getChannelData(channel), channel * buffer.length);
+    }
+
+    expect(
+      detectAudioBeatsFromPlanarSamples({
+        samples: planar,
+        samplesPerChannel: buffer.length,
+        channelCount: buffer.numberOfChannels,
+        sampleRate: buffer.sampleRate,
+        startSeconds: 0.5,
+        endSeconds: 1.5,
+        maxBeats: 1,
+      }),
+    ).toEqual([0.7]);
   });
 });
