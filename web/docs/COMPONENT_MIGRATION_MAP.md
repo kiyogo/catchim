@@ -33,7 +33,7 @@ This document specifies the exact mapping of every component, state store, and p
 | `src/timeline/components/timeline-playhead.tsx` | Scrubber needle, vertical indicator line | `opencut_engine::canvas::playhead` | Direct Canvas Overlay Pass | **Migrated** |
 | `src/timeline/placement/overlap.ts` | Track placement collision detection | `opencut_engine::timeline::Track::can_place` | Native WASM (Zero Alloc) | **Migrated** |
 | `src/timeline/snapping/resolve.ts` | Multi-point snap resolver | `opencut_engine::timeline::snap_points_sorted` | Rust WASM for sorted points, TypeScript fallback | **Incremental: Rust primary when initialized; fallback retained** |
-| `src/timeline/selection-hit-testing.ts` | Rubberband marquee and clip selection hit testing | `opencut_engine::canvas::hit_test_clip` | Native WASM | **Migrated** |
+| `src/timeline/selection-hit-testing.ts` | Rubberband marquee and clip selection hit testing | `opencut_engine::canvas::select_rect_intersections` | Rust WASM for rectangle selection; TypeScript fallback | **Incremental: Rust primary when initialized; fallback retained** |
 
 ### 2.3. Video, Audio & Effects Engine
 

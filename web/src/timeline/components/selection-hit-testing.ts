@@ -1,4 +1,5 @@
 import type { TimelineTrack } from "@/timeline";
+import { getRustTimelineSelectionBindings } from "@/native/rust-engine";
 import { timelineTimeToPixels } from "@/timeline/pixel-utils";
 import {
 	TIMELINE_CONTENT_TOP_PADDING_PX,
@@ -96,7 +97,10 @@ export function resolveTimelineElementIntersections({
 		startPos,
 		endPos: currentPos,
 	});
-	const selectedElements: TimelineElementRef[] = [];
+	const candidates: Array<{
+		ref: TimelineElementRef;
+		rectangle: SelectionRectangle;
+	}> = [];
 
 	for (const [trackIndex, track] of tracks.entries()) {
 		const trackTop = getCumulativeHeightBefore({
@@ -117,21 +121,57 @@ export function resolveTimelineElementIntersections({
 
 		for (const element of track.elements) {
 			const elementLeft = timelineTimeToPixels({ time: element.startTime, zoomLevel });
-			if (elementLeft > selectionRectangle.right) {
-				continue;
-			}
-
 			const elementRight = timelineTimeToPixels({ time: element.startTime + element.duration, zoomLevel });
-			if (elementRight < selectionRectangle.left) {
-				continue;
-			}
 
-			selectedElements.push({
-				trackId: track.id,
-				elementId: element.id,
+			candidates.push({
+				ref: {
+					trackId: track.id,
+					elementId: element.id,
+				},
+				rectangle: {
+					left: elementLeft,
+					top: elementTop,
+					right: elementRight,
+					bottom: elementBottom,
+				},
 			});
 		}
 	}
 
-	return selectedElements;
+	const rust = getRustTimelineSelectionBindings();
+	if (rust && candidates.length > 0) {
+		const rectangles = new Float64Array(candidates.length * 4);
+		for (let index = 0; index < candidates.length; index += 1) {
+			const { left, top, right, bottom } = candidates[index].rectangle;
+			const offset = index * 4;
+			rectangles[offset] = left;
+			rectangles[offset + 1] = top;
+			rectangles[offset + 2] = right;
+			rectangles[offset + 3] = bottom;
+		}
+
+		const selectedIndices = rust.selectRectIntersections(
+			rectangles,
+			Float64Array.of(
+				selectionRectangle.left,
+				selectionRectangle.top,
+				selectionRectangle.right,
+				selectionRectangle.bottom,
+			),
+		);
+		if (selectedIndices) {
+			return selectedIndices.flatMap((index) =>
+				candidates[index] ? [candidates[index].ref] : [],
+			);
+		}
+	}
+
+	return candidates
+		.filter(({ rectangle }) =>
+			isRectangleIntersecting({
+				elementRectangle: rectangle,
+				selectionRectangle,
+			}),
+		)
+		.map(({ ref }) => ref);
 }

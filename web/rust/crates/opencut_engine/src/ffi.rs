@@ -914,3 +914,29 @@ pub extern "C" fn ocw_timeline_hit_test_clip(
     engine.hit_test_clip(px, py, rect, handle_w) as i32
 }
 
+#[no_mangle]
+pub extern "C" fn ocw_canvas_select_rect_intersections(
+    rectangles_ptr: *const f64,
+    rectangle_count: usize,
+    selection_ptr: *const f64,
+    out_indices_ptr: *mut i32,
+    out_capacity: usize,
+) -> usize {
+    if rectangles_ptr.is_null()
+        || selection_ptr.is_null()
+        || out_indices_ptr.is_null()
+        || rectangle_count == 0
+        || out_capacity < rectangle_count
+    {
+        return 0;
+    }
+
+    let Some(rectangle_values) = rectangle_count.checked_mul(4) else {
+        return 0;
+    };
+    let rectangles = unsafe { slice::from_raw_parts(rectangles_ptr, rectangle_values) };
+    let selection = unsafe { slice::from_raw_parts(selection_ptr, 4) };
+    let out_indices = unsafe { slice::from_raw_parts_mut(out_indices_ptr, out_capacity) };
+    crate::canvas::select_rect_intersections(rectangles, selection, out_indices)
+}
+

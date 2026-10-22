@@ -43,6 +43,38 @@ pub struct TimelineCanvasFrame {
     pub playhead_x: f32,
 }
 
+pub fn select_rect_intersections(
+    rectangles: &[f64],
+    selection: &[f64],
+    out_indices: &mut [i32],
+) -> usize {
+    if selection.len() < 4 || rectangles.len() % 4 != 0 {
+        return 0;
+    }
+
+    let selection_left = selection[0];
+    let selection_top = selection[1];
+    let selection_right = selection[2];
+    let selection_bottom = selection[3];
+    let mut selected_count = 0;
+
+    for (index, rectangle) in rectangles.chunks_exact(4).enumerate() {
+        let intersects = !(rectangle[2] < selection_left
+            || rectangle[0] > selection_right
+            || rectangle[3] < selection_top
+            || rectangle[1] > selection_bottom);
+        if intersects && selected_count < out_indices.len() {
+            let Ok(index) = i32::try_from(index) else {
+                break;
+            };
+            out_indices[selected_count] = index;
+            selected_count += 1;
+        }
+    }
+
+    selected_count
+}
+
 pub struct TimelineCanvasLayoutEngine {
     pub base_pixels_per_second: f32,
     pub ruler_height: f32,
@@ -132,18 +164,43 @@ impl TimelineCanvasLayoutEngine {
         let x = self.time_to_pixels(start_ticks, zoom);
         let w = self.time_to_pixels(duration_ticks, zoom);
         let y = self.ruler_height + (track_index as f32) * (self.track_height + self.track_gap);
-        RectF { x, y, w, h: self.track_height }
+        RectF {
+            x,
+            y,
+            w,
+            h: self.track_height,
+        }
     }
 
     pub fn compute_trim_handles(&self, clip_rect: RectF, handle_width: f32) -> (RectF, RectF) {
         let hw = handle_width.min(clip_rect.w * 0.4);
-        let left = RectF { x: clip_rect.x, y: clip_rect.y, w: hw, h: clip_rect.h };
-        let right = RectF { x: clip_rect.x + clip_rect.w - hw, y: clip_rect.y, w: hw, h: clip_rect.h };
+        let left = RectF {
+            x: clip_rect.x,
+            y: clip_rect.y,
+            w: hw,
+            h: clip_rect.h,
+        };
+        let right = RectF {
+            x: clip_rect.x + clip_rect.w - hw,
+            y: clip_rect.y,
+            w: hw,
+            h: clip_rect.h,
+        };
         (left, right)
     }
 
-    pub fn hit_test_clip(&self, px: f32, py: f32, clip_rect: RectF, handle_width: f32) -> TimelineHitZone {
-        if px < clip_rect.x || px > clip_rect.x + clip_rect.w || py < clip_rect.y || py > clip_rect.y + clip_rect.h {
+    pub fn hit_test_clip(
+        &self,
+        px: f32,
+        py: f32,
+        clip_rect: RectF,
+        handle_width: f32,
+    ) -> TimelineHitZone {
+        if px < clip_rect.x
+            || px > clip_rect.x + clip_rect.w
+            || py < clip_rect.y
+            || py > clip_rect.y + clip_rect.h
+        {
             return TimelineHitZone::None;
         }
         let (left, right) = self.compute_trim_handles(clip_rect, handle_width);
@@ -197,5 +254,20 @@ mod tests {
         let miss = engine.hit_test_clip(150.0, 40.0, rect, 8.0);
         assert_eq!(miss, TimelineHitZone::None);
     }
-}
 
+    #[test]
+    fn test_selection_rect_intersections_keep_touching_edges_and_order() {
+        let rectangles = [
+            0.0, 0.0, 10.0, 10.0, // inside
+            10.0, 3.0, 20.0, 8.0, // shares the selection's right edge
+            10.5, 0.0, 12.0, 2.0, // just outside
+        ];
+        let selection = [0.0, 0.0, 10.0, 10.0];
+        let mut indices = [0; 3];
+
+        let count = select_rect_intersections(&rectangles, &selection, &mut indices);
+
+        assert_eq!(count, 2);
+        assert_eq!(&indices[..count], &[0, 1]);
+    }
+}

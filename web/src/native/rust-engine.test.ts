@@ -3,7 +3,10 @@ import {
   detectAudioBeats,
   detectAudioBeatsFromPlanarSamples,
 } from "@/media/beat-detection";
-import { initRustEngine } from "./rust-engine";
+import {
+  getRustTimelineSelectionBindings,
+  initRustEngine,
+} from "./rust-engine";
 
 function createBeatBuffer(): AudioBuffer {
   const sampleRate = 500;
@@ -113,5 +116,20 @@ describe("Rust WASM beat detection", () => {
         maxBeats: 1,
       }),
     ).toEqual([0.7]);
+  });
+
+  test("selects inclusive rectangle intersections through Rust WASM", async () => {
+    await initRustEngine();
+    const bindings = getRustTimelineSelectionBindings();
+    expect(bindings?.selectRectIntersections).toBeTypeOf("function");
+    if (!bindings) return;
+
+    const rectangles = Float64Array.from([
+      0, 0, 2, 2,
+      10, 3, 20, 8,
+      10.5, 0, 12, 2,
+    ]);
+    const selection = Float64Array.from([0, 0, 10, 10]);
+    expect(bindings.selectRectIntersections(rectangles, selection)).toEqual([0, 1]);
   });
 });

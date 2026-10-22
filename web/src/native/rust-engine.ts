@@ -7,6 +7,14 @@ import type { NativeTimelineBindings } from "./opencut-core";
 
 let rustBindings: NativeTimelineBindings | null = null;
 let rustLoadPromise: Promise<NativeTimelineBindings | null> | null = null;
+let rustSelectionBindings: RustTimelineSelectionBindings | null = null;
+
+export interface RustTimelineSelectionBindings {
+	selectRectIntersections: (
+		rectangles: Float64Array,
+		selection: Float64Array,
+	) => number[] | null;
+}
 
 export async function initRustEngine(): Promise<NativeTimelineBindings | null> {
 	if (rustBindings) {
@@ -281,6 +289,7 @@ export async function initRustEngine(): Promise<NativeTimelineBindings | null> {
 					return new Uint8Array(memory.buffer);
 				},
 			};
+			rustSelectionBindings = createRustTimelineSelectionBindings(exp, memory);
 
 			console.info("[RustEngine] WebAssembly core loaded and bound.");
 			return rustBindings;
@@ -304,4 +313,71 @@ function stringToCStr(exp: any, str: string): number {
 
 export function getRustEngineBindings(): NativeTimelineBindings | null {
 	return rustBindings;
+}
+
+export function getRustTimelineSelectionBindings(): RustTimelineSelectionBindings | null {
+	return rustSelectionBindings;
+}
+
+function createRustTimelineSelectionBindings(
+	exp: Record<string, any>,
+	memory: WebAssembly.Memory,
+): RustTimelineSelectionBindings | null {
+	const select = exp.ocw_canvas_select_rect_intersections;
+	if (typeof select !== "function") {
+		return null;
+	}
+
+	return {
+		selectRectIntersections(rectangles, selection) {
+			if (
+				rectangles.length === 0 ||
+				rectangles.length % 4 !== 0 ||
+				selection.length !== 4
+			) {
+				return null;
+			}
+
+			const rectangleCount = rectangles.length / 4;
+			let rectanglesPtr = 0;
+			let selectionPtr = 0;
+			let outIndicesPtr = 0;
+			try {
+				rectanglesPtr = exp.oc_malloc(rectangles.byteLength);
+				selectionPtr = exp.oc_malloc(selection.byteLength);
+				outIndicesPtr = exp.oc_malloc(rectangleCount * Int32Array.BYTES_PER_ELEMENT);
+				if (!rectanglesPtr || !selectionPtr || !outIndicesPtr) {
+					return null;
+				}
+
+				const heap = new Float64Array(memory.buffer);
+				heap.set(rectangles, rectanglesPtr >> 3);
+				heap.set(selection, selectionPtr >> 3);
+				const selectedCount = select(
+					rectanglesPtr,
+					rectangleCount,
+					selectionPtr,
+					outIndicesPtr,
+					rectangleCount,
+				);
+				if (
+					!Number.isInteger(selectedCount) ||
+					selectedCount < 0 ||
+					selectedCount > rectangleCount
+				) {
+					return null;
+				}
+
+				return Array.from(
+					new Int32Array(memory.buffer, outIndicesPtr, selectedCount),
+				);
+			} catch {
+				return null;
+			} finally {
+				if (outIndicesPtr) exp.oc_free(outIndicesPtr);
+				if (selectionPtr) exp.oc_free(selectionPtr);
+				if (rectanglesPtr) exp.oc_free(rectanglesPtr);
+			}
+		},
+	};
 }
