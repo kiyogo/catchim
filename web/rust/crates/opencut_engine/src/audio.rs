@@ -68,6 +68,44 @@ pub fn compute_peak_buckets(samples: &[f32], starts: &[u32], ends: &[u32], out_p
     }
 }
 
+pub fn sample_peak_buckets(
+    amplitudes: &[f32],
+    bucket_size: f64,
+    starts: &[f64],
+    ends: &[f64],
+    out_peaks: &mut [f32],
+) {
+    let num_buckets = starts.len().min(ends.len()).min(out_peaks.len());
+    if !bucket_size.is_finite() || bucket_size <= 0.0 {
+        out_peaks[..num_buckets].fill(0.0);
+        return;
+    }
+
+    for index in 0..num_buckets {
+        let start = starts[index];
+        let end = ends[index];
+        if start.is_nan() || end.is_nan() || end <= start {
+            out_peaks[index] = 0.0;
+            continue;
+        }
+
+        let start_index = (start / bucket_size).floor().max(0.0) as usize;
+        let end_index =
+            ((end / bucket_size).ceil()).max(start_index.saturating_add(1) as f64) as usize;
+        let range_start = start_index.min(amplitudes.len());
+        let range_end = end_index.min(amplitudes.len());
+        let mut peak = 0.0f32;
+        if range_start < range_end {
+            for &amplitude in &amplitudes[range_start..range_end] {
+                if amplitude > peak {
+                    peak = amplitude;
+                }
+            }
+        }
+        out_peaks[index] = peak;
+    }
+}
+
 pub fn compute_rms_buckets(
     samples: &[f32],
     max_window: usize,
@@ -304,6 +342,39 @@ mod tests {
         compute_peak_buckets(&samples, &starts, &ends, &mut peaks);
         assert!((peaks[0] - 0.8).abs() < 1e-5);
         assert!((peaks[1] - 0.9).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_sample_peak_buckets_matches_sample_ranges() {
+        let amplitudes = vec![0.1, 0.8, 0.3, 0.9, 0.2];
+        let starts = vec![0.0, 4.0, 8.0, 3.0, 10.0, 2.0];
+        let ends = vec![4.0, 8.0, 10.0, 5.0, 12.0, 2.0];
+        let mut peaks = vec![0.0; starts.len()];
+
+        sample_peak_buckets(&amplitudes, 2.0, &starts, &ends, &mut peaks);
+
+        assert_eq!(peaks, vec![0.8, 0.9, 0.2, 0.8, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_sample_peak_buckets_clears_output_for_invalid_bucket_size() {
+        let mut peaks = vec![1.0, 1.0];
+
+        sample_peak_buckets(&[0.5], 0.0, &[0.0, 1.0], &[1.0, 2.0], &mut peaks);
+
+        assert_eq!(peaks, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_sample_peak_buckets_handles_infinite_sample_bounds() {
+        let amplitudes = vec![0.2, 0.8, 0.3];
+        let starts = vec![f64::NEG_INFINITY, 0.0];
+        let ends = vec![2.0, f64::INFINITY];
+        let mut peaks = vec![0.0; starts.len()];
+
+        sample_peak_buckets(&amplitudes, 2.0, &starts, &ends, &mut peaks);
+
+        assert_eq!(peaks, vec![0.2, 0.8]);
     }
 
     fn beat_test_samples(channel_count: usize) -> Vec<f32> {

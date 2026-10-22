@@ -8,12 +8,22 @@ import type { NativeTimelineBindings } from "./opencut-core";
 let rustBindings: NativeTimelineBindings | null = null;
 let rustLoadPromise: Promise<NativeTimelineBindings | null> | null = null;
 let rustSelectionBindings: RustTimelineSelectionBindings | null = null;
+let rustAudioBindings: RustAudioBindings | null = null;
 
 export interface RustTimelineSelectionBindings {
 	selectRectIntersections: (
 		rectangles: Float64Array,
 		selection: Float64Array,
 	) => number[] | null;
+}
+
+export interface RustAudioBindings {
+	samplePeakBuckets: (args: {
+		amplitudes: Float32Array;
+		bucketSize: number;
+		starts: Float64Array;
+		ends: Float64Array;
+	}) => Float32Array | null;
 }
 
 export async function initRustEngine(): Promise<NativeTimelineBindings | null> {
@@ -290,6 +300,7 @@ export async function initRustEngine(): Promise<NativeTimelineBindings | null> {
 				},
 			};
 			rustSelectionBindings = createRustTimelineSelectionBindings(exp, memory);
+			rustAudioBindings = createRustAudioBindings(exp, memory);
 
 			console.info("[RustEngine] WebAssembly core loaded and bound.");
 			return rustBindings;
@@ -317,6 +328,75 @@ export function getRustEngineBindings(): NativeTimelineBindings | null {
 
 export function getRustTimelineSelectionBindings(): RustTimelineSelectionBindings | null {
 	return rustSelectionBindings;
+}
+
+export function getRustAudioBindings(): RustAudioBindings | null {
+	return rustAudioBindings;
+}
+
+function createRustAudioBindings(
+	exp: Record<string, any>,
+	memory: WebAssembly.Memory,
+): RustAudioBindings | null {
+	const samplePeakBuckets = exp.ocw_audio_sample_peak_buckets;
+	if (typeof samplePeakBuckets !== "function") {
+		return null;
+	}
+
+	return {
+		samplePeakBuckets({ amplitudes, bucketSize, starts, ends }) {
+			if (
+				starts.length !== ends.length ||
+				!Number.isFinite(bucketSize) ||
+				bucketSize <= 0
+			) {
+				return null;
+			}
+			if (starts.length === 0) {
+				return new Float32Array();
+			}
+			if (amplitudes.length === 0) {
+				return new Float32Array(starts.length);
+			}
+
+			let amplitudesPtr = 0;
+			let startsPtr = 0;
+			let endsPtr = 0;
+			let outPeaksPtr = 0;
+			try {
+				amplitudesPtr = exp.oc_malloc(amplitudes.byteLength);
+				startsPtr = exp.oc_malloc(starts.byteLength);
+				endsPtr = exp.oc_malloc(ends.byteLength);
+				outPeaksPtr = exp.oc_malloc(starts.length * Float32Array.BYTES_PER_ELEMENT);
+				if (!amplitudesPtr || !startsPtr || !endsPtr || !outPeaksPtr) {
+					return null;
+				}
+
+				const heapF32 = new Float32Array(memory.buffer);
+				const heapF64 = new Float64Array(memory.buffer);
+				heapF32.set(amplitudes, amplitudesPtr >> 2);
+				heapF64.set(starts, startsPtr >> 3);
+				heapF64.set(ends, endsPtr >> 3);
+				samplePeakBuckets(
+					amplitudesPtr,
+					amplitudes.length,
+					bucketSize,
+					startsPtr,
+					endsPtr,
+					starts.length,
+					outPeaksPtr,
+				);
+				return new Float32Array(memory.buffer, outPeaksPtr, starts.length).slice();
+			} catch {
+				return null;
+			} finally {
+				if (outPeaksPtr) exp.oc_free(outPeaksPtr);
+				if (endsPtr) exp.oc_free(endsPtr);
+				if (startsPtr) exp.oc_free(startsPtr);
+				if (amplitudesPtr) exp.oc_free(amplitudesPtr);
+			}
+		},
+	};
 }
 
 function createRustTimelineSelectionBindings(

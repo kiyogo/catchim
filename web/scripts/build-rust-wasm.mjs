@@ -73,6 +73,7 @@ for (const requiredExport of [
   "oc_malloc",
   "oc_free",
   "ocw_audio_detect_beats",
+  "ocw_audio_sample_peak_buckets",
 ]) {
   if (!exportNames.has(requiredExport)) {
     throw new Error(

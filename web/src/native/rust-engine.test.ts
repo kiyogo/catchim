@@ -4,9 +4,11 @@ import {
   detectAudioBeatsFromPlanarSamples,
 } from "@/media/beat-detection";
 import {
+  getRustAudioBindings,
   getRustTimelineSelectionBindings,
   initRustEngine,
 } from "./rust-engine";
+import { sampleSourceWaveformSummary } from "@/media/waveform-summary";
 
 function createBeatBuffer(): AudioBuffer {
   const sampleRate = 500;
@@ -29,7 +31,7 @@ function createBeatBuffer(): AudioBuffer {
   } as unknown as AudioBuffer;
 }
 
-describe("Rust WASM beat detection", () => {
+describe("Rust WASM processing", () => {
   test("matches the TypeScript compatibility path on the same audio", async () => {
     const buffer = createBeatBuffer();
     const fallback = detectAudioBeats({
@@ -131,5 +133,35 @@ describe("Rust WASM beat detection", () => {
     ]);
     const selection = Float64Array.from([0, 0, 10, 10]);
     expect(bindings.selectRectIntersections(rectangles, selection)).toEqual([0, 1]);
+  });
+
+  test("samples source waveform summary ranges through Rust WASM", async () => {
+    await initRustEngine();
+    expect(getRustAudioBindings()?.samplePeakBuckets).toBeTypeOf("function");
+
+    const summary = {
+      sourceKey: "media:test",
+      sampleRate: 48_000,
+      totalSamples: 10,
+      bucketSize: 2,
+      amplitudes: Float32Array.from([0.1, 0.8, 0.3, 0.9, 0.2]),
+    };
+    const actual = sampleSourceWaveformSummary({
+      summary,
+      buckets: [
+        { bucketStart: 0, bucketEnd: 4 },
+        { bucketStart: 4, bucketEnd: 8 },
+        { bucketStart: 8, bucketEnd: 10 },
+        { bucketStart: 3, bucketEnd: 5 },
+        { bucketStart: 10, bucketEnd: 12 },
+        { bucketStart: 2, bucketEnd: 2 },
+        { bucketStart: Number.NEGATIVE_INFINITY, bucketEnd: 2 },
+        { bucketStart: 0, bucketEnd: Number.POSITIVE_INFINITY },
+      ],
+    });
+
+    expect(actual).toEqual(
+      Array.from(Float32Array.from([0.8, 0.9, 0.2, 0.8, 0, 0, 0.1, 0.9])),
+    );
   });
 });

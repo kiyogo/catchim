@@ -45,6 +45,7 @@ This document specifies the exact mapping of every component, state store, and p
 | `src/effects/definitions/chroma-key.ts` | Green/blue screen keying, spill suppression | `opencut_engine::effects::chroma_key` | WebGPU Compute Shader (`chroma_key.wgsl`) | **Migrated** |
 | `src/masks/` | Analytical SDF shapes, bezier paths, feathering | `opencut_engine::masks` | WebGPU Compute Shader (`mask.wgsl`) | **Migrated** |
 | `src/media/audio.ts` | Multi-track audio mixing, volume envelopes, gain ramps | `opencut_engine::audio` | Rust Multi-Track Audio Mixer | **Migrated** |
+| `src/media/waveform-summary.ts::sampleSourceWaveformSummary` | Downsample cached source waveform peaks for visible timeline ranges | `opencut_engine::audio::sample_peak_buckets` via `ocw_audio_sample_peak_buckets` | Rust WASM with TypeScript compatibility fallback | **Incremental: Rust primary when loaded; fallback retained** |
 | `src/media/beat-detection.ts` | Detect editable beat bookmarks from selected audio | `opencut_engine::audio::detect_audio_beats` via `ocw_audio_detect_beats` | Rust WASM in Web Worker with TypeScript compatibility fallback | **Incremental: Rust primary when loaded; fallback retained** |
 | `src/animation/bezier.ts` | 24-step cubic bezier bisection solver | `opencut_engine::animation::bezier` | Native WASM Instructions | **Migrated** |
 | `src/animation/interpolation.ts` | Scalar and discrete keyframe channel evaluator | `opencut_engine::animation::interpolation` | Native WASM Struct-of-Arrays | **Migrated** |

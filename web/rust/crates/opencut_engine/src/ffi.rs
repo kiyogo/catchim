@@ -14,7 +14,7 @@ use crate::timeline::{
 use crate::audio::{
     apply_gain_ramp, clamp_buffer_samples, compute_buffer_peak, compute_peak_buckets,
     compute_rms_buckets, detect_audio_beats, downmix_stereo, mix_buffers, mix_channel_retime,
-    resample_linear,
+    resample_linear, sample_peak_buckets,
 };
 use crate::effects::{
     apply_chroma_key_rgba, apply_color_grading_rgba, apply_gaussian_blur_rgba, apply_vignette_rgba,
@@ -405,6 +405,31 @@ pub extern "C" fn ocw_audio_compute_peak_buckets(
     let max_sample = ends.iter().copied().max().unwrap_or(0) as usize;
     let samples = unsafe { slice::from_raw_parts(samples_ptr, max_sample) };
     compute_peak_buckets(samples, starts, ends, out);
+}
+
+#[no_mangle]
+pub extern "C" fn ocw_audio_sample_peak_buckets(
+    amplitudes_ptr: *const f32,
+    amplitude_count: usize,
+    bucket_size: f64,
+    starts_ptr: *const f64,
+    ends_ptr: *const f64,
+    num_buckets: usize,
+    out_peaks_ptr: *mut f32,
+) {
+    if amplitudes_ptr.is_null()
+        || starts_ptr.is_null()
+        || ends_ptr.is_null()
+        || out_peaks_ptr.is_null()
+        || num_buckets == 0
+    {
+        return;
+    }
+    let amplitudes = unsafe { slice::from_raw_parts(amplitudes_ptr, amplitude_count) };
+    let starts = unsafe { slice::from_raw_parts(starts_ptr, num_buckets) };
+    let ends = unsafe { slice::from_raw_parts(ends_ptr, num_buckets) };
+    let out = unsafe { slice::from_raw_parts_mut(out_peaks_ptr, num_buckets) };
+    sample_peak_buckets(amplitudes, bucket_size, starts, ends, out);
 }
 
 #[no_mangle]

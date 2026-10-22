@@ -3,6 +3,7 @@
 import { getSourceTimeAtClipTime } from "@/retime";
 import type { RetimeConfig } from "@/timeline";
 import { getNativeTimelineBindings } from "@/native/opencut-core";
+import { getRustAudioBindings } from "@/native/rust-engine";
 import { webGpuEngine } from "@/native/webgpu-engine";
 
 const RMS_ANALYSIS_WINDOW_SECONDS = 0.02;
@@ -243,6 +244,23 @@ export function sampleSourceWaveformSummary({
 	summary: SourceWaveformSummary;
 	buckets: SampleBucket[];
 }): number[] {
+	const rustAudio = getRustAudioBindings();
+	if (rustAudio && buckets.length > 0) {
+		try {
+			const peaks = rustAudio.samplePeakBuckets({
+				amplitudes: summary.amplitudes,
+				bucketSize: summary.bucketSize,
+				starts: Float64Array.from(buckets, ({ bucketStart }) => bucketStart),
+				ends: Float64Array.from(buckets, ({ bucketEnd }) => bucketEnd),
+			});
+			if (peaks) {
+				return Array.from(peaks);
+			}
+		} catch (error) {
+			console.warn("[OpenCut] Rust waveform sampling fallback:", error);
+		}
+	}
+
 	return buckets.map(({ bucketStart, bucketEnd }) => {
 		if (bucketEnd <= bucketStart) {
 			return 0;
