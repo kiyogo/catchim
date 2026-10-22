@@ -18,7 +18,9 @@ Run commands from `web/` unless noted.
 - Development server: `npm run dev`
 - Next.js production build: `npm run build`
 - Browser/Vite build: `npm run build:browser`
+- Rust/WASM core build and browser artifact sync: `npm run build:rust:wasm` (`build` and `build:browser` invoke it automatically)
 - Lint: `npm run lint`
+- The lint script is defined, but in the current install `eslint` is unavailable (`'eslint' is not recognized`); report that as an environment limitation unless the dependency is installed.
 - Type check: `npx tsc --noEmit`
 - TypeScript tests (Vitest is installed; there is no `test` package script): `npx vitest run`
 - Rust unit tests: `cargo test --manifest-path rust/crates/opencut_engine/Cargo.toml`

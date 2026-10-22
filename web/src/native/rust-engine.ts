@@ -222,6 +222,26 @@ export async function initRustEngine(): Promise<NativeTimelineBindings | null> {
 					exp.ocw_audio_clamp_buffer_samples(samplesPtr, numSamples, maxPeak),
 				downmixStereo: (leftPtr: number, rightPtr: number, outPtr: number, numSamples: number) =>
 					exp.ocw_audio_downmix_stereo(leftPtr, rightPtr, outPtr, numSamples),
+				detectAudioBeats: (
+					samplesPtr: number,
+					samplesPerChannel: number,
+					channelCount: number,
+					sampleRate: number,
+					startSeconds: number,
+					endSeconds: number,
+					maxBeats: number,
+					outTimesPtr: number,
+				) =>
+					exp.ocw_audio_detect_beats(
+						samplesPtr,
+						samplesPerChannel,
+						channelCount,
+						sampleRate,
+						startSeconds,
+						endSeconds,
+						maxBeats,
+						outTimesPtr,
+					),
 				uiSceneCreate: () => exp.ocw_ui_scene_create(),
 				uiSceneDestroy: (scene: number) => exp.ocw_ui_scene_destroy(scene),
 				uiCreateNode: (scene: number, nodeType: number, x: number, y: number, w: number, h: number) =>

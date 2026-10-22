@@ -13,7 +13,8 @@ use crate::timeline::{
 };
 use crate::audio::{
     apply_gain_ramp, clamp_buffer_samples, compute_buffer_peak, compute_peak_buckets,
-    compute_rms_buckets, downmix_stereo, mix_buffers, mix_channel_retime, resample_linear,
+    compute_rms_buckets, detect_audio_beats, downmix_stereo, mix_buffers, mix_channel_retime,
+    resample_linear,
 };
 use crate::effects::{
     apply_chroma_key_rgba, apply_color_grading_rgba, apply_gaussian_blur_rgba, apply_vignette_rgba,
@@ -424,6 +425,45 @@ pub extern "C" fn ocw_audio_compute_rms_buckets(
     let max_sample = ends.iter().copied().max().unwrap_or(0) as usize;
     let samples = unsafe { slice::from_raw_parts(samples_ptr, max_sample) };
     compute_rms_buckets(samples, max_window, starts, ends, out);
+}
+
+#[no_mangle]
+pub extern "C" fn ocw_audio_detect_beats(
+    samples_ptr: *const f32,
+    samples_per_channel: usize,
+    channel_count: usize,
+    sample_rate: f64,
+    start_seconds: f64,
+    end_seconds: f64,
+    max_beats: usize,
+    out_times_ptr: *mut f64,
+) -> usize {
+    if samples_ptr.is_null() || out_times_ptr.is_null() || channel_count == 0 || max_beats == 0 {
+        return 0;
+    }
+    let Some(total_samples) = samples_per_channel.checked_mul(channel_count) else {
+        return 0;
+    };
+    if total_samples > isize::MAX as usize / std::mem::size_of::<f32>()
+        || max_beats > isize::MAX as usize / std::mem::size_of::<f64>()
+    {
+        return 0;
+    }
+    let samples = unsafe { slice::from_raw_parts(samples_ptr, total_samples) };
+    let beats = detect_audio_beats(
+        samples,
+        samples_per_channel,
+        channel_count,
+        sample_rate,
+        start_seconds,
+        end_seconds,
+        max_beats,
+    );
+    let beat_count = beats.len().min(max_beats);
+    unsafe {
+        slice::from_raw_parts_mut(out_times_ptr, beat_count).copy_from_slice(&beats[..beat_count]);
+    }
+    beat_count
 }
 
 #[no_mangle]

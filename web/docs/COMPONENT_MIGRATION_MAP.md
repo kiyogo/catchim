@@ -45,6 +45,7 @@ This document specifies the exact mapping of every component, state store, and p
 | `src/effects/definitions/chroma-key.ts` | Green/blue screen keying, spill suppression | `opencut_engine::effects::chroma_key` | WebGPU Compute Shader (`chroma_key.wgsl`) | **Migrated** |
 | `src/masks/` | Analytical SDF shapes, bezier paths, feathering | `opencut_engine::masks` | WebGPU Compute Shader (`mask.wgsl`) | **Migrated** |
 | `src/media/audio.ts` | Multi-track audio mixing, volume envelopes, gain ramps | `opencut_engine::audio` | Rust Multi-Track Audio Mixer | **Migrated** |
+| `src/media/beat-detection.ts` | Detect editable beat bookmarks from selected audio | `opencut_engine::audio::detect_audio_beats` via `ocw_audio_detect_beats` | Rust WASM with TypeScript compatibility fallback | **Incremental: Rust primary when loaded; fallback retained** |
 | `src/animation/bezier.ts` | 24-step cubic bezier bisection solver | `opencut_engine::animation::bezier` | Native WASM Instructions | **Migrated** |
 | `src/animation/interpolation.ts` | Scalar and discrete keyframe channel evaluator | `opencut_engine::animation::interpolation` | Native WASM Struct-of-Arrays | **Migrated** |
 | `src/export/scene-exporter.ts` | Video/Audio frame capture, encoding & MP4 muxing | `opencut_engine::gpu::export` & WebCodecs | Hardware WebCodecs Pipeline | **Migrated** |

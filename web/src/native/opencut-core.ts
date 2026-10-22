@@ -115,6 +115,16 @@ export interface NativeTimelineBindings {
 	computeBufferPeak: (samplesPtr: number, numSamples: number) => number;
 	clampBufferSamples: (samplesPtr: number, numSamples: number, maxPeak: number) => void;
 	downmixStereo: (leftPtr: number, rightPtr: number, outPtr: number, numSamples: number) => void;
+	detectAudioBeats?: (
+		samplesPtr: number,
+		samplesPerChannel: number,
+		channelCount: number,
+		sampleRate: number,
+		startSeconds: number,
+		endSeconds: number,
+		maxBeats: number,
+		outTimesPtr: number,
+	) => number;
 	uiSceneCreate?: () => number;
 	uiSceneDestroy?: (scene: number) => void;
 	uiCreateNode?: (scene: number, nodeType: number, x: number, y: number, w: number, h: number) => number;

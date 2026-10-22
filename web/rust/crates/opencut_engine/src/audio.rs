@@ -110,6 +110,118 @@ pub fn compute_rms_buckets(
     }
 }
 
+/// Detect strong positive energy onsets and return their source-time positions.
+/// `samples` contains planar channel data (all samples for channel 0, then channel 1, etc.).
+pub fn detect_audio_beats(
+    samples: &[f32],
+    samples_per_channel: usize,
+    channel_count: usize,
+    sample_rate: f64,
+    start_seconds: f64,
+    end_seconds: f64,
+    max_beats: usize,
+) -> Vec<f64> {
+    const ANALYSIS_WINDOW_SECONDS: f64 = 0.02;
+    const MIN_BEAT_GAP_SECONDS: f64 = 0.24;
+
+    if samples_per_channel == 0
+        || channel_count == 0
+        || max_beats == 0
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !start_seconds.is_finite()
+        || !end_seconds.is_finite()
+    {
+        return Vec::new();
+    }
+
+    let Some(required_samples) = samples_per_channel.checked_mul(channel_count) else {
+        return Vec::new();
+    };
+    if samples.len() < required_samples {
+        return Vec::new();
+    }
+
+    let duration = samples_per_channel as f64 / sample_rate;
+    let start_sample = (start_seconds * sample_rate)
+        .floor()
+        .clamp(0.0, samples_per_channel as f64) as usize;
+    let end_sample = (end_seconds * sample_rate)
+        .ceil()
+        .clamp(0.0, samples_per_channel as f64) as usize;
+    if end_sample <= start_sample || end_seconds <= 0.0 || start_seconds >= duration {
+        return Vec::new();
+    }
+
+    let window_size = (sample_rate * ANALYSIS_WINDOW_SECONDS).round().max(1.0) as usize;
+    let sample_range = end_sample - start_sample;
+    let window_count = sample_range / window_size + usize::from(sample_range % window_size != 0);
+    if window_count < 3 {
+        return Vec::new();
+    }
+
+    let mut energy = Vec::with_capacity(window_count);
+    for window in 0..window_count {
+        let from = start_sample + window * window_size;
+        let to = (from + window_size).min(end_sample);
+        let mut sum = 0.0_f64;
+        let mut count = 0_usize;
+        for channel in 0..channel_count {
+            let channel_offset = channel * samples_per_channel;
+            for sample in from..to {
+                let value = samples[channel_offset + sample] as f64;
+                sum += value * value;
+                count += 1;
+            }
+        }
+        energy.push(if count == 0 {
+            0.0
+        } else {
+            (sum / count as f64).sqrt() as f32
+        });
+    }
+
+    let mut onset = vec![0.0_f32; window_count];
+    let mut onset_total = 0.0_f64;
+    let mut onset_count = 0_usize;
+    for index in 1..window_count {
+        let increase = (energy[index] as f64 - energy[index - 1] as f64).max(0.0);
+        onset[index] = increase as f32;
+        if increase > 0.0 {
+            onset_total += increase;
+            onset_count += 1;
+        }
+    }
+    if onset_count == 0 {
+        return Vec::new();
+    }
+    let mean_onset = onset_total / onset_count as f64;
+    if mean_onset <= 0.0 {
+        return Vec::new();
+    }
+
+    let min_gap_windows = (MIN_BEAT_GAP_SECONDS / ANALYSIS_WINDOW_SECONDS).round() as isize;
+    let mut last_beat_window = -min_gap_windows;
+    let mut beats = Vec::with_capacity(max_beats.min(window_count));
+    for index in 1..window_count - 1 {
+        if (onset[index] as f64) < mean_onset * 1.65
+            || onset[index] < onset[index - 1]
+            || onset[index] < onset[index + 1]
+            || energy[index] < 0.012
+            || index as isize - last_beat_window < min_gap_windows
+        {
+            continue;
+        }
+
+        beats.push((start_sample + index * window_size) as f64 / sample_rate);
+        last_beat_window = index as isize;
+        if beats.len() >= max_beats {
+            break;
+        }
+    }
+    beats
+}
+
 pub fn compute_buffer_peak(samples: &[f32]) -> f32 {
     let mut peak = 0.0f32;
     for &s in samples {
@@ -160,7 +272,11 @@ pub fn mix_channel_retime(
         }
         let frac = (src_idx_f - idx0 as f64) as f32;
         let s0 = source[idx0];
-        let s1 = if idx0 + 1 < source.len() { source[idx0 + 1] } else { s0 };
+        let s1 = if idx0 + 1 < source.len() {
+            source[idx0 + 1]
+        } else {
+            s0
+        };
         let interp = s0 + (s1 - s0) * frac;
         out[out_start_sample + i] += interp * gain;
     }
@@ -188,5 +304,41 @@ mod tests {
         compute_peak_buckets(&samples, &starts, &ends, &mut peaks);
         assert!((peaks[0] - 0.8).abs() < 1e-5);
         assert!((peaks[1] - 0.9).abs() < 1e-5);
+    }
+
+    fn beat_test_samples(channel_count: usize) -> Vec<f32> {
+        let samples_per_channel = 1_000;
+        let mut samples = vec![0.0; samples_per_channel * channel_count];
+        let levels = [(5, 0.05), (20, 0.10), (35, 0.90), (50, 0.15), (65, 0.20)];
+        for channel in 0..channel_count {
+            let channel_offset = channel * samples_per_channel;
+            for (window, level) in levels {
+                let start = channel_offset + window * 10;
+                samples[start..start + 10].fill(level);
+            }
+        }
+        samples
+    }
+
+    #[test]
+    fn test_detect_audio_beats_matches_onset_threshold_and_gap() {
+        let samples = beat_test_samples(1);
+        let beats = detect_audio_beats(&samples, 1_000, 1, 500.0, 0.0, 2.0, 120);
+        assert_eq!(beats, vec![0.7]);
+    }
+
+    #[test]
+    fn test_detect_audio_beats_respects_channels_range_and_limit() {
+        let samples = beat_test_samples(2);
+        let beats = detect_audio_beats(&samples, 1_000, 2, 500.0, 0.5, 1.5, 1);
+        assert_eq!(beats, vec![0.7]);
+    }
+
+    #[test]
+    fn test_detect_audio_beats_returns_empty_for_silence_or_invalid_inputs() {
+        let silence = vec![0.0; 1_000];
+        assert!(detect_audio_beats(&silence, 1_000, 1, 500.0, 0.0, 2.0, 120).is_empty());
+        assert!(detect_audio_beats(&silence, 1_000, 1, 0.0, 0.0, 2.0, 120).is_empty());
+        assert!(detect_audio_beats(&silence, 1_000, 2, 500.0, 0.0, 2.0, 120).is_empty());
     }
 }

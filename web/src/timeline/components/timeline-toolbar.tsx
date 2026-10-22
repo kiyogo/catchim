@@ -43,6 +43,7 @@ import {
 	Layers01Icon,
 	Chart03Icon,
 	Unlink02Icon,
+	MusicNote01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { OcRippleIcon } from "@/components/icons";
@@ -50,6 +51,18 @@ import { GraphEditorPopover } from "./graph-editor/popover";
 import { PopoverTrigger } from "@/components/ui/popover";
 import { useGraphEditorController } from "./graph-editor/use-controller";
 import { useTranslation } from "@/i18n";
+import { useState } from "react";
+import { toast } from "sonner";
+import { createAudioContext } from "@/media/audio";
+import { detectAudioBeats } from "@/media/beat-detection";
+import {
+	addMediaTime,
+	mediaTimeFromSeconds,
+	TICKS_PER_SECOND,
+	type MediaTime,
+} from "@/wasm";
+import { BatchCommand } from "@/commands";
+import { ToggleBookmarkCommand } from "@/commands/scene";
 
 export function TimelineToolbar({
 	zoomLevel,
@@ -131,6 +144,74 @@ function ToolbarLeftSection() {
 		isSourceAudioSeparated({
 			element: selectedElement.element,
 		});
+	const [isDetectingBeats, setIsDetectingBeats] = useState(false);
+	const canDetectBeats =
+		selectedElement?.element.type === "audio" &&
+		selectedMediaAsset?.type === "audio";
+
+	const handleDetectBeats = async () => {
+		if (
+			!canDetectBeats ||
+			!selectedElement ||
+			selectedElement.element.type !== "audio" ||
+			!selectedMediaAsset
+		)
+			return;
+
+		setIsDetectingBeats(true);
+		let audioContext: AudioContext | null = null;
+		try {
+			audioContext = createAudioContext();
+			const audioBuffer = await audioContext.decodeAudioData(
+				await selectedMediaAsset.file.arrayBuffer(),
+			);
+			const element = selectedElement.element;
+			const speed = Math.max(0.01, element.retime?.rate ?? 1);
+			const ticksPerSecond = TICKS_PER_SECOND;
+			const trimStartSeconds = element.trimStart / ticksPerSecond;
+			const trimEndSeconds = Math.min(
+				audioBuffer.duration,
+				trimStartSeconds + (element.duration / ticksPerSecond) * speed,
+			);
+			const detected = detectAudioBeats({
+				buffer: audioBuffer,
+				startSeconds: trimStartSeconds,
+				endSeconds: trimEndSeconds,
+			});
+			const markerTimes: MediaTime[] = [];
+			for (const sourceSeconds of detected) {
+				const clipSeconds = (sourceSeconds - trimStartSeconds) / speed;
+				const time = addMediaTime({
+					a: element.startTime,
+					b: mediaTimeFromSeconds({ seconds: clipSeconds }),
+				});
+				if (!editor.scenes.isBookmarked({ time })) {
+					markerTimes.push(time);
+				}
+			}
+			if (markerTimes.length > 0) {
+				editor.command.execute({
+					command: new BatchCommand(
+						markerTimes.map((time) => new ToggleBookmarkCommand(time)),
+					),
+				});
+			}
+			const added = markerTimes.length;
+			toast.success(
+				added > 0
+					? t("timeline.beatsMarked").replace("{count}", String(added))
+					: t("timeline.noBeatsFound"),
+			);
+		} catch (error) {
+			console.error("Failed to detect audio beats:", error);
+			toast.error(t("timeline.beatDetectionFailed"));
+		} finally {
+			if (audioContext && audioContext.state !== "closed") {
+				await audioContext.close();
+			}
+			setIsDetectingBeats(false);
+		}
+	};
 
 	const handleAction = ({
 		action,
@@ -185,6 +266,16 @@ function ToolbarLeftSection() {
 					onClick={({ event }) =>
 						handleAction({ action: "duplicate-selected", event })
 					}
+				/>
+
+				<ToolbarButton
+					icon={<HugeiconsIcon icon={MusicNote01Icon} />}
+					tooltip={t("timeline.detectBeats")}
+					disabled={!canDetectBeats || isDetectingBeats}
+					onClick={({ event }) => {
+						event.stopPropagation();
+						void handleDetectBeats();
+					}}
 				/>
 
 				<ToolbarButton

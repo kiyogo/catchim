@@ -70,13 +70,15 @@ cmake --build app/build --config Release
 
 ### Running Web Editor
 
-Requirements: Node.js 18+ or Bun.
+Requirements: Node.js 18+ or Bun. `npm run dev` uses the checked-in browser WASM artifact. Building the web app also requires Rust/Cargo and the `wasm32-unknown-unknown` target.
 
 ```bash
 cd web
 npm install
 npm run dev
 ```
+
+After changing the Rust core, refresh its browser artifact with `npm run build:rust:wasm`. Both `npm run build` and `npm run build:browser` rebuild it automatically.
 
 ### Building C++ Core for Web
 

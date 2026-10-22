@@ -419,6 +419,10 @@ export interface LocaleMessages {
 		descending: string;
 		duplicate: string;
 		duplicateElement: string;
+		detectBeats: string;
+		beatsMarked: string;
+		noBeatsFound: string;
+		beatDetectionFailed: string;
 		expandKeyframes: string;
 		extractAudio: string;
 		freezeFrameComingSoon: string;

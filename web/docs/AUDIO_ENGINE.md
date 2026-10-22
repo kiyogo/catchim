@@ -38,6 +38,12 @@ Extracts visual energy envelopes for timeline display:
 - **RMS Energy**: Calculates root-mean-square amplitude to reflect perceived loudness:
   $$\text{RMS} = \sqrt{\frac{1}{N} \sum_{i=1}^N s_i^2}$$
 
+### 2.5. Beat Marker Detection (Incremental Rust Migration)
+
+`src/media/beat-detection.ts` uses the Rust `audio::detect_audio_beats` implementation through the `ocw_audio_detect_beats` C ABI export when the Rust WASM binding is available. The Rust routine combines channels into 20 ms RMS windows, finds positive energy onsets, applies the existing 1.65× mean-onset threshold, 0.012 energy floor, 240 ms minimum gap, and requested marker limit, then returns source-time seconds. `src/timeline/components/timeline-toolbar.tsx` maps those source positions onto the selected clip and creates the existing bookmark commands.
+
+The browser adapter copies planar `AudioBuffer` channel data into WASM memory for this call. The work still runs synchronously on the calling thread, so this change does not claim a worker-based or measured speedup. The original TypeScript algorithm remains the compatibility fallback if Rust is unavailable, the call fails, or the input exceeds 256 MiB. The Rust WASM artifact is rebuilt and export-checked with `npm run build:rust:wasm`; the Next.js and browser builds run that command automatically.
+
 ---
 
 ## 3. Web Audio & AudioWorklet Synchronization
