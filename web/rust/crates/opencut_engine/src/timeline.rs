@@ -114,7 +114,8 @@ impl Timeline {
 
     pub fn add_track(&mut self, track_id: String, track_type: TrackType) {
         if !self.tracks.contains_key(&track_id) {
-            self.tracks.insert(track_id.clone(), Track::new(track_id.clone(), track_type));
+            self.tracks
+                .insert(track_id.clone(), Track::new(track_id.clone(), track_type));
             self.track_order.push(track_id);
         }
     }
@@ -156,7 +157,7 @@ pub struct SnapResult {
     pub distance: i64,
 }
 
-pub fn snap_points_sorted(target: i64, points: &[i64], threshold: i64) -> SnapResult {
+pub fn snap_points_sorted(target: i64, points: &[i64], threshold: f64) -> SnapResult {
     if points.is_empty() {
         return SnapResult {
             snapped_time: target,
@@ -165,21 +166,32 @@ pub fn snap_points_sorted(target: i64, points: &[i64], threshold: i64) -> SnapRe
         };
     }
 
-    let idx = match points.binary_search(&target) {
-        Ok(i) => i,
-        Err(i) => i,
+    let lower_bound = |value: i64| {
+        let mut low = 0;
+        let mut high = points.len();
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if points[mid] < value {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        low
     };
+    let first_candidate = lower_bound((target as f64 - threshold).floor() as i64);
+    let last_candidate_time = (target as f64 + threshold).ceil() as i64;
 
-    let mut best_dist = i64::MAX;
+    let mut best_dist = u64::MAX;
     let mut best_val = target;
     let mut best_idx = -1;
 
-    let start = idx.saturating_sub(1);
-    let end = (idx + 1).min(points.len().saturating_sub(1));
-
-    for (i, &p) in points.iter().enumerate().take(end + 1).skip(start) {
-        let dist = (target - p).abs();
-        if dist <= threshold && dist < best_dist {
+    for (i, &p) in points.iter().enumerate().skip(first_candidate) {
+        if p > last_candidate_time {
+            break;
+        }
+        let dist = target.abs_diff(p);
+        if dist as f64 <= threshold && dist < best_dist {
             best_dist = dist;
             best_val = p;
             best_idx = i as i32;
@@ -189,7 +201,7 @@ pub fn snap_points_sorted(target: i64, points: &[i64], threshold: i64) -> SnapRe
     SnapResult {
         snapped_time: best_val,
         matched_index: best_idx,
-        distance: best_dist,
+        distance: best_dist.min(i64::MAX as u64) as i64,
     }
 }
 
@@ -236,12 +248,34 @@ mod tests {
     #[test]
     fn test_snapping() {
         let points = vec![0, 100, 250, 500];
-        let res = snap_points_sorted(98, &points, 5);
+        let res = snap_points_sorted(98, &points, 5.0);
         assert_eq!(res.snapped_time, 100);
         assert_eq!(res.matched_index, 1);
 
-        let res2 = snap_points_sorted(90, &points, 5);
+        let res2 = snap_points_sorted(90, &points, 5.0);
         assert_eq!(res2.snapped_time, 90);
         assert_eq!(res2.matched_index, -1);
+    }
+
+    #[test]
+    fn test_sorted_snapping_preserves_first_tie_and_duplicate() {
+        let points = vec![90, 100, 100, 110];
+        let tie = snap_points_sorted(105, &points, 10.0);
+        assert_eq!(tie.snapped_time, 100);
+        assert_eq!(tie.matched_index, 1);
+
+        let duplicate = snap_points_sorted(100, &points, 0.0);
+        assert_eq!(duplicate.snapped_time, 100);
+        assert_eq!(duplicate.matched_index, 1);
+    }
+
+    #[test]
+    fn test_sorted_snapping_keeps_fractional_threshold() {
+        let points = vec![100];
+        let res = snap_points_sorted(103, &points, 3.5);
+        assert_eq!(res.matched_index, 0);
+
+        let outside = snap_points_sorted(104, &points, 3.5);
+        assert_eq!(outside.matched_index, -1);
     }
 }

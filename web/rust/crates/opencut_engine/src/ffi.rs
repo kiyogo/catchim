@@ -265,7 +265,7 @@ pub extern "C" fn ocw_snap_points_sorted(
     }
     let points = unsafe { slice::from_raw_parts(points_ptr, count) };
     let points_i64: Vec<i64> = points.iter().map(|&p| p as i64).collect();
-    let res = rust_snap_points_sorted(target as i64, &points_i64, threshold as i64);
+    let res = rust_snap_points_sorted(target as i64, &points_i64, threshold);
 
     if !out_snapped.is_null() {
         unsafe { *out_snapped = res.snapped_time as f64; }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolveTimelineSnap, type SnapPoint } from "@/timeline/snapping";
+import { initRustEngine } from "@/native/rust-engine";
 import { mediaTime } from "@/wasm";
 
 function snapPoint(time: number): SnapPoint {
@@ -45,5 +46,30 @@ describe("resolveTimelineSnap", () => {
 
 		expect(result.snappedTime).toBe(mediaTime({ ticks: 90 }));
 		expect(result.snapPoint).toBeNull();
+	});
+
+	test("uses Rust for sorted input while preserving the first duplicate", async () => {
+		const bindings = await initRustEngine();
+		expect(bindings?.snapPointsSorted).toBeTypeOf("function");
+		if (!bindings) return;
+
+		const firstDuplicate = { ...snapPoint(100), elementId: "first" };
+		const secondDuplicate = { ...snapPoint(100), elementId: "second" };
+		const result = resolveTimelineSnap({
+			targetTime: mediaTime({ ticks: 100 }),
+			snapPoints: [firstDuplicate, secondDuplicate],
+			maxSnapDistance: 0,
+		});
+
+		expect(result.snappedTime).toBe(mediaTime({ ticks: 100 }));
+		expect(result.snapPoint?.elementId).toBe("first");
+		expect(result.snapDistance).toBe(0);
+
+		const fractionalThresholdResult = resolveTimelineSnap({
+			targetTime: mediaTime({ ticks: 103 }),
+			snapPoints: [snapPoint(100)],
+			maxSnapDistance: 3.5,
+		});
+		expect(fractionalThresholdResult.snappedTime).toBe(mediaTime({ ticks: 100 }));
 	});
 });
