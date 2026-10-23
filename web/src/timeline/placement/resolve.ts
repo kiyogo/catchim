@@ -1,4 +1,5 @@
 import type { SceneTracks, TrackType, TimelineTrack } from "@/timeline";
+import { isTrackLocked } from "@/timeline/track-capabilities";
 import {
 	getDefaultInsertIndexForTrack,
 	getHighestInsertIndexForTrack,
@@ -78,6 +79,7 @@ function findFirstAvailableTrackIndex({
 	return tracks.findIndex((track) => {
 		return (
 			track.type === trackType &&
+			!isTrackLocked(track) &&
 			canPlaceTimeSpansOnTrack({
 				track,
 				timeSpans,
@@ -153,7 +155,7 @@ export function resolveTrackPlacement({
 		}
 
 		const track = orderedTracks[trackIndex];
-		if (track.type !== trackType) {
+		if (track.type !== trackType || isTrackLocked(track)) {
 			return null;
 		}
 
@@ -190,7 +192,9 @@ export function resolveTrackPlacement({
 	if (strategy.type === "preferIndex") {
 		const preferredTrack = orderedTracks[strategy.trackIndex];
 		const isPreferredTrackCompatible =
-			!!preferredTrack && preferredTrack.type === trackType;
+			!!preferredTrack &&
+			preferredTrack.type === trackType &&
+			!isTrackLocked(preferredTrack);
 		const canUseExistingTrack =
 			!strategy.createNewTrackOnly &&
 			isPreferredTrackCompatible &&

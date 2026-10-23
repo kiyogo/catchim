@@ -4,11 +4,42 @@
  */
 
 import type { NativeTimelineBindings } from "./opencut-core";
+import { initializeExportRangeBindings } from "./export-range";
+import { initializeAudioExportBindings } from "./audio-export";
+import { initializeCaptionTimingBindings } from "./caption-timing";
+import type {
+	AudioBufferScheduleRequest,
+	AudioBufferScheduleResult,
+} from "@/media/audio-scheduling";
 
 let rustBindings: NativeTimelineBindings | null = null;
 let rustLoadPromise: Promise<NativeTimelineBindings | null> | null = null;
 let rustSelectionBindings: RustTimelineSelectionBindings | null = null;
 let rustAudioBindings: RustAudioBindings | null = null;
+let rustAudioSchedulingBindings: RustAudioSchedulingBindings | null = null;
+let rustExportTimingBindings: RustExportTimingBindings | null = null;
+let rustTrackGapBindings: RustTrackGapBindings | null = null;
+
+export interface ExportFrameSample {
+	timeTicks: number;
+	timestampSeconds: number;
+	durationSeconds: number;
+}
+
+export interface RustExportTimingBindings {
+	frameCount: (duration: number, numerator: number, denominator: number) => number | null;
+	frameSample: (duration: number, numerator: number, denominator: number, index: number) => ExportFrameSample | null;
+}
+
+export interface RustTrackGapBindings {
+	planTrackGapStarts: (starts: Float64Array, durations: Float64Array) => number[] | null;
+}
+
+export interface RustAudioSchedulingBindings {
+	planBufferSchedule: (
+		request: AudioBufferScheduleRequest,
+	) => AudioBufferScheduleResult | null;
+}
 
 export interface RustTimelineSelectionBindings {
 	selectRectIntersections: (
@@ -301,6 +332,12 @@ export async function initRustEngine(): Promise<NativeTimelineBindings | null> {
 			};
 			rustSelectionBindings = createRustTimelineSelectionBindings(exp, memory);
 			rustAudioBindings = createRustAudioBindings(exp, memory);
+			rustAudioSchedulingBindings = createRustAudioSchedulingBindings(exp, memory);
+			rustExportTimingBindings = createRustExportTimingBindings(exp, memory);
+			rustTrackGapBindings = createRustTrackGapBindings(exp, memory);
+			initializeExportRangeBindings(exp, memory);
+			initializeAudioExportBindings(exp, memory);
+			initializeCaptionTimingBindings(exp, memory);
 
 			console.info("[RustEngine] WebAssembly core loaded and bound.");
 			return rustBindings;
@@ -332,6 +369,157 @@ export function getRustTimelineSelectionBindings(): RustTimelineSelectionBinding
 
 export function getRustAudioBindings(): RustAudioBindings | null {
 	return rustAudioBindings;
+}
+
+export function getRustAudioSchedulingBindings(): RustAudioSchedulingBindings | null {
+	return rustAudioSchedulingBindings;
+}
+
+export function getRustExportTimingBindings(): RustExportTimingBindings | null {
+	return rustExportTimingBindings;
+}
+
+export function getRustTrackGapBindings(): RustTrackGapBindings | null {
+	return rustTrackGapBindings;
+}
+
+type EditingWasmExports = {
+	oc_malloc: (size: number) => number;
+	oc_free: (pointer: number) => void;
+	ocw_export_frame_count?: (duration: number, numerator: number, denominator: number) => number;
+	ocw_export_frame_sample?: (duration: number, numerator: number, denominator: number, index: number, out: number) => number;
+	ocw_timeline_compact_gaps?: (starts: number, durations: number, count: number, out: number) => number;
+};
+
+function validExportInputs(duration: number, numerator: number, denominator: number): boolean {
+	return Number.isSafeInteger(duration) && duration >= 0 &&
+		[numerator, denominator].every((value) => Number.isInteger(value) && value > 0 && value <= 0xffff_ffff);
+}
+
+export function createRustExportTimingBindings(exp: EditingWasmExports, memory: WebAssembly.Memory): RustExportTimingBindings | null {
+	const count = exp.ocw_export_frame_count;
+	const sample = exp.ocw_export_frame_sample;
+	if (!count || !sample) return null;
+	return {
+		frameCount(duration, numerator, denominator) {
+			if (!validExportInputs(duration, numerator, denominator)) return null;
+			const result = count(duration, numerator, denominator);
+			return Number.isSafeInteger(result) && result >= 0 ? result : null;
+		},
+		frameSample(duration, numerator, denominator, index) {
+			if (!validExportInputs(duration, numerator, denominator) || !Number.isSafeInteger(index) || index < 0) return null;
+			let pointer = 0;
+			try {
+				pointer = exp.oc_malloc(3 * Float64Array.BYTES_PER_ELEMENT);
+				if (!pointer || sample(duration, numerator, denominator, index, pointer) !== 1) return null;
+				const [timeTicks, timestampSeconds, durationSeconds] = new Float64Array(memory.buffer, pointer, 3);
+				if (!Number.isSafeInteger(timeTicks) || timeTicks < 0 || timeTicks >= duration ||
+					!Number.isFinite(timestampSeconds) || timestampSeconds < 0 ||
+					!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+				return { timeTicks, timestampSeconds, durationSeconds };
+			} finally {
+				if (pointer) exp.oc_free(pointer);
+			}
+		},
+	};
+}
+
+export function createRustTrackGapBindings(exp: EditingWasmExports, memory: WebAssembly.Memory): RustTrackGapBindings | null {
+	const plan = exp.ocw_timeline_compact_gaps;
+	if (!plan) return null;
+	return {
+		planTrackGapStarts(starts, durations) {
+			if (starts.length !== durations.length || starts.length > 1_000_000) return null;
+			if (starts.length === 0) return [];
+			for (let index = 0; index < starts.length; index++) {
+				if (!Number.isSafeInteger(starts[index]) || starts[index] < 0 ||
+					!Number.isSafeInteger(durations[index]) || durations[index] <= 0 ||
+					!Number.isSafeInteger(starts[index] + durations[index])) return null;
+			}
+			const pointers: number[] = [];
+			try {
+				for (let index = 0; index < 3; index++) {
+					const pointer = exp.oc_malloc(starts.byteLength);
+					if (!pointer) return null;
+					pointers.push(pointer);
+				}
+				new Float64Array(memory.buffer, pointers[0], starts.length).set(starts);
+				new Float64Array(memory.buffer, pointers[1], durations.length).set(durations);
+				if (plan(pointers[0], pointers[1], starts.length, pointers[2]) !== 1) return null;
+				const result = Array.from(new Float64Array(memory.buffer, pointers[2], starts.length));
+				return result.every((value) => Number.isSafeInteger(value) && value >= 0) ? result : null;
+			} finally {
+				for (const pointer of pointers) exp.oc_free(pointer);
+			}
+		},
+	};
+}
+
+type AudioSchedulingWasmExports = {
+	oc_malloc: (size: number) => number;
+	oc_free: (pointer: number) => void;
+	ocw_audio_plan_buffer_schedule?: (
+		clipStart: number,
+		clipDuration: number,
+		sourceStart: number,
+		playbackRate: number,
+		bufferStart: number,
+		bufferDuration: number,
+		requestedStart: number,
+		contextOffset: number,
+		contextNow: number,
+		outWindow: number,
+	) => number;
+};
+
+function createRustAudioSchedulingBindings(
+	exp: AudioSchedulingWasmExports,
+	memory: WebAssembly.Memory,
+): RustAudioSchedulingBindings | null {
+	const plan = exp.ocw_audio_plan_buffer_schedule;
+	if (typeof plan !== "function") return null;
+
+	return {
+		planBufferSchedule(request) {
+			let windowPtr = 0;
+			try {
+				windowPtr = exp.oc_malloc(4 * Float64Array.BYTES_PER_ELEMENT);
+				if (!windowPtr) return null;
+				const status = plan(
+					request.clipStart,
+					request.clipDuration,
+					request.sourceStart,
+					request.playbackRate,
+					request.bufferStart,
+					request.bufferDuration,
+					request.requestedStart,
+					request.contextOffset,
+					request.contextNow,
+					windowPtr,
+				);
+				if (status === -1) return { status: "invalid" };
+				if (status === 0) return { status: "empty" };
+				if (status !== 1) return null;
+
+				const [contextStart, sourceOffset, sourceDuration, timelineStart] =
+					new Float64Array(memory.buffer, windowPtr, 4);
+				if (
+					![contextStart, sourceOffset, sourceDuration, timelineStart].every(Number.isFinite) ||
+					contextStart < 0 || sourceOffset < 0 || sourceDuration <= 0 || timelineStart < 0
+				) {
+					return null;
+				}
+				return {
+					status: "ready",
+					window: { contextStart, sourceOffset, sourceDuration, timelineStart },
+				};
+			} catch {
+				return null;
+			} finally {
+				if (windowPtr) exp.oc_free(windowPtr);
+			}
+		},
+	};
 }
 
 function createRustAudioBindings(

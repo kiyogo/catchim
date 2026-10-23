@@ -6,6 +6,7 @@ import {
 	Delete02Icon,
 	MagicWand05Icon,
 	MusicNote03Icon,
+	HeadphonesIcon,
 	ScissorIcon,
 	TaskAdd02Icon,
 	TextIcon,
@@ -15,12 +16,16 @@ import {
 	VolumeOffIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { Lock, Unlock } from "lucide-react";
 import { OcShapesIcon, OcVideoIcon } from "@/components/icons";
 import {
 	ContextMenu,
 	ContextMenuContent,
 	ContextMenuItem,
 	ContextMenuSeparator,
+	ContextMenuSub,
+	ContextMenuSubContent,
+	ContextMenuSubTrigger,
 	ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useTimelineZoom } from "@/timeline/hooks/use-timeline-zoom";
@@ -92,6 +97,9 @@ import { invokeAction } from "@/actions";
 import { resolveTimelineElementIntersections } from "./selection-hit-testing";
 import { cn } from "@/utils/ui";
 import { useTranslation } from "@/i18n";
+import { toast } from "sonner";
+import { downloadBlob } from "@/utils/browser";
+import { serializeSubtitleTrack, type SubtitleExportFormat } from "@/subtitles/export";
 
 const TRACKS_CONTAINER_MAX_HEIGHT = 800;
 const FALLBACK_CONTAINER_WIDTH = 1000;
@@ -130,6 +138,16 @@ export function Timeline() {
 	} = useElementSelection();
 	const editor = useEditor();
 	const timeline = editor.timeline;
+	const exportSubtitles = (track: TimelineTrack, format: SubtitleExportFormat) => {
+		try {
+			const content = serializeSubtitleTrack({ track, format });
+			const projectName = editor.project.getActiveOrNull()?.metadata.name ?? "subtitles";
+			const filename = `${projectName}-${track.name}`.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+			downloadBlob({ blob: new Blob([content], { type: format === "vtt" ? "text/vtt;charset=utf-8" : "application/x-subrip;charset=utf-8" }), filename: `${filename}.${format}` });
+		} catch (error) {
+			toast.error(t("timeline.subtitleExportFailed"), { description: error instanceof Error ? error.message : undefined });
+		}
+	};
 	const scene = useEditor((currentEditor) =>
 		currentEditor.scenes.getActiveSceneOrNull(),
 	);
@@ -624,6 +642,7 @@ export function Timeline() {
 										shouldIgnoreClick={shouldIgnoreClick}
 										isDragOver={isDragOver}
 										dropTarget={dropTarget}
+										exportSubtitles={exportSubtitles}
 									/>
 								)}
 							</div>
@@ -676,6 +695,7 @@ function TrackLabelsPanel({
 	getTrackExpansionHeight: (trackIndex: number) => number;
 }) {
 	const editor = useEditor();
+	const { t } = useTranslation();
 	const scene = useEditor((e) => e.scenes.getActiveSceneOrNull());
 	const tracks = useMemo<TimelineTrack[]>(
 		() =>
@@ -793,9 +813,50 @@ function TrackLabelsPanel({
 										}}
 									>
 										<div
-											className="flex shrink-0 items-center justify-end gap-2 px-3"
+							className="flex shrink-0 items-center justify-end gap-1 px-1"
 											style={{ height: `${baseHeight}px` }}
 										>
+											<button
+												type="button"
+								title={
+									track.locked
+										? t("timeline.unlockTrack")
+										: t("timeline.lockTrack")
+								}
+								aria-label={
+									track.locked
+										? t("timeline.unlockTrack")
+										: t("timeline.lockTrack")
+								}
+												aria-pressed={track.locked === true}
+												className="text-muted-foreground flex size-5 items-center justify-center"
+												onClick={(event) => {
+													event.stopPropagation();
+													editor.timeline.toggleTrackLock({ trackId: track.id });
+												}}
+											>
+								{track.locked ? (
+									<Lock className="size-3.5" />
+								) : (
+									<Unlock className="size-3.5" />
+								)}
+											</button>
+							<button
+								type="button"
+								title={track.solo ? t("timeline.unsoloTrack") : t("timeline.soloTrack")}
+								aria-label={track.solo ? t("timeline.unsoloTrack") : t("timeline.soloTrack")}
+								aria-pressed={track.solo === true}
+								className={cn(
+									"flex size-4 items-center justify-center",
+									track.solo ? "text-primary" : "text-muted-foreground",
+								)}
+								onClick={(event) => {
+									event.stopPropagation();
+									editor.timeline.toggleTrackSolo({ trackId: track.id });
+								}}
+							>
+								<HugeiconsIcon icon={HeadphonesIcon} className="size-3.5" />
+							</button>
 											{canTrackHaveAudio(track) && (
 												<TrackToggleIcon
 													isOff={track.muted}
@@ -847,6 +908,7 @@ function TrackLabelsPanel({
 }
 
 function TimelineTrackRows({
+	exportSubtitles,
 	dynamicTimelineWidth,
 	mainTrackId,
 	zoomLevel,
@@ -860,6 +922,7 @@ function TimelineTrackRows({
 	isDragOver,
 	dropTarget,
 }: {
+	exportSubtitles: (track: TimelineTrack, format: SubtitleExportFormat) => void;
 	dynamicTimelineWidth: number;
 	mainTrackId: string | null;
 	zoomLevel: number;
@@ -880,6 +943,7 @@ function TimelineTrackRows({
 	dropTarget: DropTarget | null;
 }) {
 	const { t } = useTranslation();
+	const editor = useEditor();
 	const timeline = useEditor((e) => e.timeline);
 	const scene = useEditor((e) => e.scenes.getActiveSceneOrNull());
 	const tracks = useMemo<TimelineTrack[]>(
@@ -990,6 +1054,40 @@ function TimelineTrackRows({
 									{t("timeline.split")}
 								</ContextMenuItem>
 								<ContextMenuItem
+									onClick={(event) => {
+										event.stopPropagation();
+										timeline.rippleDeleteElements({ elements: selectedElements });
+									}}
+								>
+									{t("timeline.rippleDelete")}
+								</ContextMenuItem>
+								<ContextMenuItem
+									onClick={(event) => {
+										event.stopPropagation();
+										timeline.splitElements({
+											elements: selectedElements,
+											splitTime: editor.playback.getCurrentTime(),
+											retainSide: "right",
+											forceRipple: true,
+										});
+									}}
+								>
+									{t("timeline.rippleTrimLeft")}
+								</ContextMenuItem>
+								<ContextMenuItem
+									onClick={(event) => {
+										event.stopPropagation();
+										timeline.splitElements({
+											elements: selectedElements,
+											splitTime: editor.playback.getCurrentTime(),
+											retainSide: "left",
+											forceRipple: true,
+										});
+									}}
+								>
+									{t("timeline.rippleTrimRight")}
+								</ContextMenuItem>
+								<ContextMenuItem
 									icon={<HugeiconsIcon icon={Copy01Icon} />}
 									onClick={(event: React.MouseEvent) => {
 										event.stopPropagation();
@@ -1020,6 +1118,27 @@ function TimelineTrackRows({
 								<ContextMenuSeparator />
 							</>
 						)}
+						{selectedElements.length > 1 && selectedElements.some((el) => el.trackId === track.id) && (
+							<>
+								<ContextMenuItem
+									onClick={(event) => {
+										event.stopPropagation();
+										timeline.linkElements({ elements: selectedElements, linked: true });
+									}}
+								>
+									{t("timeline.linkSelectedClips")}
+								</ContextMenuItem>
+								<ContextMenuItem
+									onClick={(event) => {
+										event.stopPropagation();
+										timeline.linkElements({ elements: selectedElements, linked: false });
+									}}
+								>
+									{t("timeline.unlinkSelectedClips")}
+								</ContextMenuItem>
+								<ContextMenuSeparator />
+							</>
+						)}
 						<ContextMenuItem
 							icon={<HugeiconsIcon icon={TaskAdd02Icon} />}
 							onClick={(event: React.MouseEvent) => {
@@ -1028,6 +1147,71 @@ function TimelineTrackRows({
 							}}
 						>
 							{t("timeline.pasteElements")}
+						</ContextMenuItem>
+						<ContextMenuSub>
+							<ContextMenuSubTrigger>{t("timeline.addTrack")}</ContextMenuSubTrigger>
+							<ContextMenuSubContent>
+								{([
+									["video", "addVideoTrack"],
+									["audio", "addAudioTrack"],
+									["text", "addTextTrack"],
+									["graphic", "addGraphicTrack"],
+									["effect", "addEffectTrack"],
+								] as const).map(([type, labelKey]) => (
+									<ContextMenuItem
+										key={type}
+										onClick={(event) => {
+											event.stopPropagation();
+											timeline.addTrack({ type });
+										}}
+									>
+										{t(`timeline.${labelKey}`)}
+									</ContextMenuItem>
+								))}
+							</ContextMenuSubContent>
+						</ContextMenuSub>
+						{track.type === "text" && (
+							<ContextMenuSub>
+								<ContextMenuSubTrigger icon={<HugeiconsIcon icon={TextIcon} />} disabled={track.elements.length === 0}>
+									{t("timeline.exportSubtitles")}
+								</ContextMenuSubTrigger>
+								<ContextMenuSubContent>
+									{(["srt", "vtt"] as const).map((format) => (
+										<ContextMenuItem key={format} onClick={(event) => { event.stopPropagation(); exportSubtitles(track, format); }}>
+											{format === "srt" ? "SubRip (.srt)" : "WebVTT (.vtt)"}
+										</ContextMenuItem>
+									))}
+								</ContextMenuSubContent>
+							</ContextMenuSub>
+						)}
+						<ContextMenuItem
+							icon={<HugeiconsIcon icon={ScissorIcon} />}
+							disabled={track.locked === true || track.elements.length < 2}
+							onClick={(event: React.MouseEvent) => {
+								event.stopPropagation();
+								timeline.closeTrackGaps({ trackId: track.id });
+							}}
+						>
+							{t("timeline.closeTrackGaps")}
+						</ContextMenuItem>
+						<ContextMenuItem
+							icon={track.locked ? <Lock /> : <Unlock />}
+							onClick={(event: React.MouseEvent) => {
+								event.stopPropagation();
+								timeline.toggleTrackLock({ trackId: track.id });
+							}}
+						>
+							{track.locked
+								? t("timeline.unlockTrack")
+								: t("timeline.lockTrack")}
+						</ContextMenuItem>
+						<ContextMenuItem
+							onClick={(event) => {
+								event.stopPropagation();
+								timeline.toggleTrackSolo({ trackId: track.id });
+							}}
+						>
+							{track.solo ? t("timeline.unsoloTrack") : t("timeline.soloTrack")}
 						</ContextMenuItem>
 						<ContextMenuItem
 							icon={<HugeiconsIcon icon={VolumeHighIcon} />}
@@ -1051,9 +1235,48 @@ function TimelineTrackRows({
 								? t("timeline.showTrack")
 								: t("timeline.hideTrack")}
 						</ContextMenuItem>
+						<ContextMenuItem
+							disabled={track.locked === true}
+							onClick={(event) => {
+								event.stopPropagation();
+								const nextName = window.prompt(t("timeline.renameTrack"), track.name);
+								if (nextName !== null) timeline.renameTrack({ trackId: track.id, name: nextName });
+							}}
+						>
+							{t("timeline.renameTrack")}
+						</ContextMenuItem>
+						<ContextMenuItem
+							disabled={
+								track.id === mainTrackId ||
+								(track.type === "audio"
+									? scene?.tracks.audio[0]?.id === track.id
+									: scene?.tracks.overlay[0]?.id === track.id)
+							}
+							onClick={(event) => {
+								event.stopPropagation();
+								timeline.reorderTrack({ trackId: track.id, direction: "up" });
+							}}
+						>
+							{t("timeline.moveTrackUp")}
+						</ContextMenuItem>
+						<ContextMenuItem
+							disabled={
+								track.id === mainTrackId ||
+								(track.type === "audio"
+									? scene?.tracks.audio.at(-1)?.id === track.id
+									: scene?.tracks.overlay.at(-1)?.id === track.id)
+							}
+							onClick={(event) => {
+								event.stopPropagation();
+								timeline.reorderTrack({ trackId: track.id, direction: "down" });
+							}}
+						>
+							{t("timeline.moveTrackDown")}
+						</ContextMenuItem>
 						{track.id !== mainTrackId && (
 							<ContextMenuItem
 								icon={<HugeiconsIcon icon={Delete02Icon} />}
+								disabled={track.locked === true}
 								onClick={(event: React.MouseEvent) => {
 									event.stopPropagation();
 									timeline.removeTrack({ trackId: track.id });

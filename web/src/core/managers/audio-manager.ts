@@ -3,6 +3,7 @@ import { TICKS_PER_SECOND } from "@/wasm";
 import { clampRetimeRate, shouldMaintainPitch } from "@/retime/rate";
 import type { AudioClipSource } from "@/media/audio";
 import { createAudioContext, collectAudioClips } from "@/media/audio";
+import { planAudioBufferSchedule } from "@/media/audio-scheduling";
 import {
 	buildAudioGainAutomation,
 	hasAnimatedVolume,
@@ -283,30 +284,33 @@ export class AudioManager {
 					});
 				if (timelineTime >= clipEnd) break;
 
-				const node = audioContext.createBufferSource();
-				node.buffer = buffer;
-				if (clip.retime) {
-					node.playbackRate.value = clampRetimeRate({ rate: clip.retime.rate });
-				}
-				const clipGain = audioContext.createGain();
-				clipGain.gain.value = clip.volume;
-				node.connect(clipGain);
-				clipGain.connect(this.masterGain ?? audioContext.destination);
-
 				const startTimestamp =
 					this.playbackStartContextTime +
 					this.playbackLatencyCompensationSeconds +
 					(timelineTime - this.playbackStartTime);
+				const rate = clampRetimeRate({ rate: clip.retime?.rate ?? 1 });
+				const schedule = planAudioBufferSchedule({
+					clipStart,
+					clipDuration: clip.duration,
+					sourceStart: clip.trimStart,
+					playbackRate: rate,
+					bufferStart: timestamp,
+					bufferDuration: buffer.duration,
+					requestedStart: iteratorStartTime,
+					contextOffset:
+						this.playbackStartContextTime +
+						this.playbackLatencyCompensationSeconds -
+						this.playbackStartTime,
+					contextNow: audioContext.currentTime,
+				});
+				if (schedule.status === "invalid") {
+					console.warn(`[AudioManager] Invalid audio schedule for clip ${clip.id}`);
+					return;
+				}
 
-				if (startTimestamp >= audioContext.currentTime) {
-					node.start(startTimestamp);
-					consecutiveDroppedBufferCount = 0;
-				} else {
+				if (schedule.status === "empty") {
 					const offset = audioContext.currentTime - startTimestamp;
-					if (offset < buffer.duration) {
-						node.start(audioContext.currentTime, offset);
-						consecutiveDroppedBufferCount = 0;
-					} else {
+					if (offset > 0) {
 						consecutiveDroppedBufferCount += 1;
 						if (consecutiveDroppedBufferCount >= 5) {
 							const nextCompensationSeconds = Math.max(
@@ -328,9 +332,23 @@ export class AudioManager {
 							});
 							return;
 						}
-						continue;
 					}
+					continue;
 				}
+
+				const node = audioContext.createBufferSource();
+				node.buffer = buffer;
+				node.playbackRate.value = rate;
+				const clipGain = audioContext.createGain();
+				clipGain.gain.value = clip.volume;
+				node.connect(clipGain);
+				clipGain.connect(this.masterGain ?? audioContext.destination);
+				node.start(
+					schedule.window.contextStart,
+					schedule.window.sourceOffset,
+					schedule.window.sourceDuration,
+				);
+				consecutiveDroppedBufferCount = 0;
 
 				this.queuedSources.add(node);
 				node.addEventListener("ended", () => {
@@ -339,9 +357,12 @@ export class AudioManager {
 					this.queuedSources.delete(node);
 				});
 
-				const aheadTime = timelineTime - this.getPlaybackTime();
+				const aheadTime = schedule.window.timelineStart - this.getPlaybackTime();
 				if (aheadTime >= 1) {
-					await this.waitUntilCaughtUp({ timelineTime, targetAhead: 1 });
+					await this.waitUntilCaughtUp({
+						timelineTime: schedule.window.timelineStart,
+						targetAhead: 1,
+					});
 					if (sessionId !== this.playbackSessionId) return;
 				}
 			}

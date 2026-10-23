@@ -21,12 +21,13 @@ export class CommandManager {
 
 	execute({ command }: { command: Command }): Command {
 		prepareBrowserHistory(this.editor);
-		const beforeTracks = this.isRippleEnabled
+		const rippleActive = this.isRippleEnabled || command.forcesRipple;
+		const beforeTracks = rippleActive && !command.appliesOwnRipple
 			? (this.editor.scenes.getActiveSceneOrNull()?.tracks ?? null)
 			: null;
 		const previousSelection = this.getSelectionSnapshot();
 		const result = command.execute();
-		this.applyRippleIfEnabled({ beforeTracks });
+		this.applyRippleIfEnabled({ beforeTracks, ripplesLeadingEdge: command.ripplesLeadingEdge });
 		const selectionOverride = this.applySelectionOverride(result);
 		this.runReactors();
 		this.history.push({
@@ -81,12 +82,13 @@ export class CommandManager {
 			return;
 		}
 
-		const beforeTracks = this.isRippleEnabled
+		const rippleActive = this.isRippleEnabled || entry.command.forcesRipple;
+		const beforeTracks = rippleActive && !entry.command.appliesOwnRipple
 			? (this.editor.scenes.getActiveSceneOrNull()?.tracks ?? null)
 			: null;
 		const previousSelection = this.getSelectionSnapshot();
 		const result = entry.command.redo();
-		this.applyRippleIfEnabled({ beforeTracks });
+		this.applyRippleIfEnabled({ beforeTracks, ripplesLeadingEdge: entry.command.ripplesLeadingEdge });
 		const selectionOverride = this.applySelectionOverride(result);
 		this.runReactors();
 
@@ -134,10 +136,15 @@ export class CommandManager {
 
 	private applyRippleIfEnabled({
 		beforeTracks,
+		ripplesLeadingEdge,
 	}: {
 		beforeTracks: SceneTracks | null;
+		ripplesLeadingEdge: boolean;
 	}): void {
-		if (!this.isRippleEnabled || !beforeTracks) {
+		if (!this.isRippleEnabled && !ripplesLeadingEdge && !beforeTracks) {
+			return;
+		}
+		if (!beforeTracks) {
 			return;
 		}
 
@@ -148,6 +155,7 @@ export class CommandManager {
 		const adjustments = computeRippleAdjustments({
 			beforeTracks,
 			afterTracks,
+			includeLeadingEdges: ripplesLeadingEdge,
 		});
 		if (adjustments.length === 0) {
 			return;

@@ -1,4 +1,8 @@
-import { Command, type CommandResult } from "@/commands/base-command";
+import {
+	Command,
+	createElementSelectionResult,
+	type CommandResult,
+} from "@/commands/base-command";
 import { EditorCore } from "@/core";
 import type {
 	CreateTimelineElement,
@@ -32,6 +36,7 @@ export interface InsertElementParams {
 export class InsertElementCommand extends Command {
 	private elementId: string;
 	private savedState: SceneTracks | null = null;
+	private appliedState: SceneTracks | null = null;
 	private targetTrackId: string | null = null;
 
 	constructor({ element, placement }: InsertElementParams) {
@@ -110,6 +115,7 @@ export class InsertElementCommand extends Command {
 			}
 		}
 
+		this.appliedState = updatedTracks;
 		editor.timeline.updateTracks(updatedTracks);
 
 		return {
@@ -129,6 +135,17 @@ export class InsertElementCommand extends Command {
 			const editor = EditorCore.getInstance();
 			editor.timeline.updateTracks(this.savedState);
 		}
+	}
+
+	redo(): CommandResult | undefined {
+		if (!this.appliedState || !this.targetTrackId) {
+			return this.execute();
+		}
+		// Auto placement can create a track; retain its ID for later edits.
+		EditorCore.getInstance().timeline.updateTracks(this.appliedState);
+		return createElementSelectionResult([
+			{ trackId: this.targetTrackId, elementId: this.elementId },
+		]);
 	}
 
 	getElementId(): string {

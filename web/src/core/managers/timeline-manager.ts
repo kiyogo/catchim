@@ -10,6 +10,7 @@ import type {
 } from "@/timeline";
 import { calculateTotalDuration } from "@/timeline";
 import { TimelineDragSource } from "@/timeline/drag-source";
+import { closeTrackGapStarts } from "@/timeline/close-gaps";
 import { findTrackInSceneTracks } from "@/timeline/track-element-update";
 import { lastFrameMediaTime, type MediaTime, ZERO_MEDIA_TIME } from "@/wasm";
 import {
@@ -17,6 +18,10 @@ import {
 	canElementHaveAudio,
 } from "@/timeline/element-utils";
 import { isElementMuted } from "@/timeline/audio-state";
+import {
+	isTrackLocked,
+	preserveLockedTrackContents,
+} from "@/timeline/track-capabilities";
 import type {
 	AnimationPath,
 	AnimationInterpolation,
@@ -34,8 +39,14 @@ import {
 	RemoveTrackCommand,
 	ToggleTrackMuteCommand,
 	ToggleTrackVisibilityCommand,
+	ToggleTrackLockCommand,
+	ToggleTrackSoloCommand,
+	ReorderTrackCommand,
+	RenameTrackCommand,
+	CloseTrackGapsCommand,
 	InsertElementCommand,
 	DeleteElementsCommand,
+	RippleDeleteElementsCommand,
 	DuplicateElementsCommand,
 	UpdateElementsCommand,
 	SplitElementsCommand,
@@ -57,6 +68,7 @@ import {
 	UpsertEffectParamKeyframeCommand,
 	RemoveEffectParamKeyframeCommand,
 	ToggleSourceAudioSeparationCommand,
+	LinkElementsCommand,
 } from "@/commands/timeline";
 import type { InsertElementParams } from "@/commands/timeline/element/insert-element";
 import type {
@@ -81,6 +93,17 @@ export class TimelineManager {
 	removeTrack({ trackId }: { trackId: string }): void {
 		const command = new RemoveTrackCommand(trackId);
 		this.editor.command.execute({ command });
+	}
+
+	closeTrackGaps({ trackId }: { trackId: string }): void {
+		const track = this.getTrackById({ trackId });
+		if (!track || isTrackLocked(track) || track.elements.length < 2) return;
+		const starts = closeTrackGapStarts({
+			starts: track.elements.map((element) => element.startTime),
+			durations: track.elements.map((element) => element.duration),
+		});
+		if (!starts || starts.every((start, index) => start === track.elements[index].startTime)) return;
+		this.editor.command.execute({ command: new CloseTrackGapsCommand(trackId) });
 	}
 
 	insertElement({ element, placement }: InsertElementParams): void {
@@ -184,19 +207,43 @@ export class TimelineManager {
 		this.editor.command.execute({ command });
 	}
 
+	toggleTrackLock({ trackId }: { trackId: string }): void {
+		const command = new ToggleTrackLockCommand(trackId);
+		this.editor.command.execute({ command });
+	}
+
+	toggleTrackSolo({ trackId }: { trackId: string }): void {
+		this.editor.command.execute({ command: new ToggleTrackSoloCommand(trackId) });
+	}
+
+	reorderTrack({ trackId, direction }: { trackId: string; direction: "up" | "down" }): void {
+		this.editor.command.execute({ command: new ReorderTrackCommand(trackId, direction) });
+	}
+
+	renameTrack({ trackId, name }: { trackId: string; name: string }): void {
+		this.editor.command.execute({ command: new RenameTrackCommand(trackId, name) });
+	}
+
+	linkElements({ elements, linked }: { elements: Array<{ trackId: string; elementId: string }>; linked: boolean }): void {
+		this.editor.command.execute({ command: new LinkElementsCommand(elements, linked) });
+	}
+
 	splitElements({
 		elements,
 		splitTime,
 		retainSide = "both",
+		forceRipple = false,
 	}: {
 		elements: { trackId: string; elementId: string }[];
 		splitTime: MediaTime;
 		retainSide?: "both" | "left" | "right";
+		forceRipple?: boolean;
 	}): { trackId: string; elementId: string }[] {
 		const command = new SplitElementsCommand({
 			elements,
 			splitTime,
 			retainSide,
+			forceRipple,
 		});
 		this.editor.command.execute({ command });
 		return command.getRightSideElements();
@@ -255,6 +302,15 @@ export class TimelineManager {
 		elements: { trackId: string; elementId: string }[];
 	}): void {
 		const command = new DeleteElementsCommand({ elements });
+		this.editor.command.execute({ command });
+	}
+
+	rippleDeleteElements({
+		elements,
+	}: {
+		elements: { trackId: string; elementId: string }[];
+	}): void {
+		const command = new RippleDeleteElementsCommand({ elements });
 		this.editor.command.execute({ command });
 	}
 
@@ -713,7 +769,9 @@ export class TimelineManager {
 		}[];
 	}): void {
 		let changedOverlayCount = 0;
-		for (const { elementId, updates: elementUpdates } of updates) {
+		for (const { trackId, elementId, updates: elementUpdates } of updates) {
+			const currentTrack = this.getTrackById({ trackId });
+			if (!currentTrack || isTrackLocked(currentTrack)) continue;
 			const existingOverlay = this.previewOverlay.get(elementId);
 			const changed = Object.entries(elementUpdates).some(([key, value]) => {
 				return !Object.is(
@@ -930,7 +988,12 @@ export class TimelineManager {
 	updateTracks(newTracks: SceneTracks): void {
 		this.previewOverlay.clear();
 		this.previewTracks = null;
-		this.editor.scenes.updateSceneTracks({ tracks: newTracks });
+		const currentTracks = this.editor.scenes.getActiveSceneOrNull()?.tracks;
+		this.editor.scenes.updateSceneTracks({
+			tracks: currentTracks
+				? preserveLockedTrackContents({ current: currentTracks, next: newTracks })
+				: newTracks,
+		});
 		this.notify();
 	}
 }

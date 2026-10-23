@@ -19,6 +19,13 @@ export function createElementSelectionResult(
 }
 
 export abstract class Command {
+	/** Commands that fully plan time positions can opt out of automatic ripple. */
+	readonly appliesOwnRipple: boolean = false;
+	/** Allows explicit ripple operations while the editor-wide ripple toggle is off. */
+	readonly forcesRipple: boolean = false;
+	/** Enables closing a vacated interval created by moving an element's leading edge. */
+	readonly ripplesLeadingEdge: boolean = false;
+
 	abstract execute(): CommandResult | undefined;
 
 	undo(): void {

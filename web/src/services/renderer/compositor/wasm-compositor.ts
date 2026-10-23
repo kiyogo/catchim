@@ -1,5 +1,6 @@
 import {
 	getCompositorCanvas,
+	getCompositorBackend,
 	getLastFrameProfile,
 	initCompositor,
 	releaseTexture,
@@ -65,6 +66,10 @@ class WasmCompositor {
 
 	getCanvas(): HTMLCanvasElement {
 		return getCompositorCanvas();
+	}
+
+	getBackend() {
+		return getCompositorBackend();
 	}
 
 	syncTextures(textures: TextureUploadDescriptor[]) {

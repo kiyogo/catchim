@@ -6,6 +6,7 @@ import {
 	updateElementInSceneTracks,
 } from "@/timeline";
 import { applyElementUpdate } from "@/timeline/update-pipeline";
+import { isTrackLocked } from "@/timeline/track-capabilities";
 
 export class UpdateElementsCommand extends Command {
 	private savedState: SceneTracks | null = null;
@@ -41,7 +42,7 @@ export class UpdateElementsCommand extends Command {
 			const currentElement = currentTrack?.elements.find(
 				(element) => element.id === updateEntry.elementId,
 			);
-			if (!currentTrack || !currentElement) {
+			if (!currentTrack || !currentElement || isTrackLocked(currentTrack)) {
 				continue;
 			}
 
@@ -62,7 +63,9 @@ export class UpdateElementsCommand extends Command {
 			});
 		}
 
-		editor.timeline.updateTracks(updatedTracks);
+		if (updatedTracks !== this.savedState) {
+			editor.timeline.updateTracks(updatedTracks);
+		}
 		return undefined;
 	}
 

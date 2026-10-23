@@ -96,28 +96,8 @@ export async function processMediaAssets({
 	let completed = 0;
 
 	for (const file of fileArray) {
-		const fileType = getMediaTypeFromFile({ file });
-
-		if (!fileType) {
-			toast.error(`Unsupported file type: ${file.name}`);
-			continue;
-		}
-
-		const storageCheck = await storageService.canStoreFile({
-			size: file.size,
-		});
-
-		if (!storageCheck.canStore) {
-			toast.error(`Not enough browser storage for ${file.name}`, {
-				description: getStorageLimitDescription({
-					fileSize: file.size,
-					availableBytes: storageCheck.availableBytes,
-				}),
-			});
-			continue;
-		}
-
-		const url = URL.createObjectURL(file);
+		let objectUrl: string | undefined;
+		let keepObjectUrl = false;
 		let thumbnailUrl: string | undefined;
 		let duration: number | undefined;
 		let width: number | undefined;
@@ -126,49 +106,72 @@ export async function processMediaAssets({
 		let hasAudio: boolean | undefined;
 
 		try {
+			const fileType = getMediaTypeFromFile({ file });
+			if (!fileType) {
+				toast.error(`Unsupported file type: ${file.name}`);
+				continue;
+			}
+
+			const storageCheck = await storageService.canStoreFile({
+				size: file.size,
+			});
+			if (!storageCheck.canStore) {
+				toast.error(`Not enough browser storage for ${file.name}`, {
+					description: getStorageLimitDescription({
+						fileSize: file.size,
+						availableBytes: storageCheck.availableBytes,
+					}),
+				});
+				continue;
+			}
+
+			objectUrl = URL.createObjectURL(file);
 			if (fileType === "image") {
 				const result = await generateImageThumbnail({ imageFile: file });
 				thumbnailUrl = result.thumbnailUrl;
 				width = result.width;
 				height = result.height;
 			} else if (fileType === "video") {
-				try {
-					const videoData = await readVideoFile({ file });
-					duration = videoData.duration;
-					width = videoData.width;
-					height = videoData.height;
-					fps = Number.isFinite(videoData.fps)
-						? Math.round(videoData.fps)
+				const videoData = await readVideoFile({ file });
+				if (
+					!Number.isFinite(videoData.duration) ||
+					videoData.duration <= 0 ||
+					!Number.isFinite(videoData.width) ||
+					videoData.width <= 0 ||
+					!Number.isFinite(videoData.height) ||
+					videoData.height <= 0
+				) {
+					throw new Error("Video metadata is incomplete or invalid");
+				}
+				duration = videoData.duration;
+				width = videoData.width;
+				height = videoData.height;
+				fps =
+					Number.isFinite(videoData.fps) && videoData.fps > 0
+						? videoData.fps
 						: undefined;
-					hasAudio = videoData.hasAudio;
-					thumbnailUrl = videoData.thumbnailUrl ?? undefined;
+				hasAudio = videoData.hasAudio;
+				thumbnailUrl = videoData.thumbnailUrl ?? undefined;
 
-					if (!videoData.canDecode) {
-						toast.error(`Can't preview ${file.name}`, {
-							description: getUnsupportedVideoDescription({
-								codec: videoData.codec,
-							}),
-						});
-					}
-				} catch (error) {
-					const message =
-						error instanceof Error
-							? error.message
-							: "Could not process video";
-
-					toast.error(`Couldn't process ${file.name}`, {
-						description: message,
+				if (!videoData.canDecode) {
+					toast.error(`Can't preview ${file.name}`, {
+						description: getUnsupportedVideoDescription({
+							codec: videoData.codec,
+						}),
 					});
 				}
 			} else if (fileType === "audio") {
 				duration = await getMediaDuration({ file });
+				if (!Number.isFinite(duration) || duration <= 0) {
+					throw new Error("Audio metadata is incomplete or invalid");
+				}
 			}
 
 			processedAssets.push({
 				name: file.name,
 				type: fileType,
 				file,
-				url,
+				url: objectUrl,
 				thumbnailUrl,
 				duration,
 				width,
@@ -176,18 +179,19 @@ export async function processMediaAssets({
 				fps,
 				hasAudio,
 			});
-
-			await new Promise((resolve) => setTimeout(resolve, 0));
-
-			completed += 1;
-			if (onProgress) {
-				const percent = Math.round((completed / total) * 100);
-				onProgress({ progress: percent });
-			}
+			keepObjectUrl = true;
 		} catch (error) {
 			console.error("Error processing file:", file.name, error);
-			toast.error(`Failed to process ${file.name}`);
-			URL.revokeObjectURL(url);
+			toast.error(`Couldn't process ${file.name}`, {
+				description: error instanceof Error ? error.message : undefined,
+			});
+		} finally {
+			if (objectUrl && !keepObjectUrl) {
+				URL.revokeObjectURL(objectUrl);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			completed += 1;
+			onProgress?.({ progress: Math.round((completed / total) * 100) });
 		}
 	}
 

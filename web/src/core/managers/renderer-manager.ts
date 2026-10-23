@@ -9,8 +9,12 @@ import { CanvasRenderer } from "@/services/renderer/canvas-renderer";
 import { SceneExporter } from "@/services/renderer/scene-exporter";
 import { buildScene } from "@/services/renderer/scene-builder";
 import { createTimelineAudioBuffer } from "@/media/audio";
+import { isAudioAbortError, throwIfAudioAborted } from "@/media/audio-cancellation";
 import { formatTimecode } from "opencut-wasm";
 import { downloadBlob } from "@/utils/browser";
+import { resolveExportRange } from "@/export/range";
+import { encodeAudioBufferWav } from "@/export/wav";
+import { getMissingExportSources } from "@/export/preflight";
 
 type SnapshotResult =
 	| { success: true; blob: Blob; filename: string }
@@ -153,7 +157,18 @@ export class RendererManager {
 		onProgress?: ({ progress }: { progress: number }) => void;
 		onCancel?: () => boolean;
 	}): Promise<ExportResult> {
-		const { format, quality, fps, includeAudio, resolution } = options;
+		const { format, quality, fps, includeAudio, resolution, audioOnly } = options;
+		const abortController = new AbortController();
+		let cancelled = false;
+		let exporter: SceneExporter | null = null;
+		const checkCancel = () => {
+			if (onCancel?.()) {
+				cancelled = true;
+				abortController.abort();
+				exporter?.cancel();
+			}
+		};
+		const cancelInterval = setInterval(checkCancel, 100);
 
 		try {
 			const tracks = this.editor.scenes.getActiveScene().tracks;
@@ -168,6 +183,11 @@ export class RendererManager {
 			if (duration === 0) {
 				return { success: false, error: "Project is empty" };
 			}
+			const range = resolveExportRange({ duration, range: options.range });
+			const missingSources = getMissingExportSources({ tracks, mediaAssets, range, includeAudio: !!includeAudio || !!audioOnly, audioOnly: !!audioOnly });
+			if (missingSources.length > 0) return { success: false, error: `Missing media source: ${missingSources.join(", ")}. Relink these files before exporting.` };
+			checkCancel();
+			if (cancelled) return { success: false, cancelled: true };
 
 			const exportFps = fps ?? activeProject.settings.fps;
 			const sourceCanvasSize = activeProject.settings.canvasSize;
@@ -178,13 +198,26 @@ export class RendererManager {
 			const coordinateScale = canvasSize.height / sourceCanvasSize.height;
 
 			let audioBuffer: AudioBuffer | null = null;
-			if (includeAudio) {
+			if (includeAudio || audioOnly) {
 				onProgress?.({ progress: 0.05 });
 				audioBuffer = await createTimelineAudioBuffer({
 					tracks,
 					mediaAssets,
-					duration,
+					duration: range.duration,
+					startTime: range.start,
+					signal: abortController.signal,
 				});
+			}
+			checkCancel();
+			if (cancelled) return { success: false, cancelled: true };
+			throwIfAudioAborted(abortController.signal);
+			if (audioOnly) {
+				if (!audioBuffer) return { success: false, error: "No audio is available in this timeline" };
+				const buffer = await encodeAudioBufferWav({ audioBuffer, signal: abortController.signal });
+				checkCancel();
+				if (cancelled) return { success: false, cancelled: true };
+				onProgress?.({ progress: 1 });
+				return { success: true, buffer };
 			}
 
 			const scene = buildScene({
@@ -196,7 +229,7 @@ export class RendererManager {
 				background: activeProject.settings.background,
 			});
 
-			const exporter = new SceneExporter({
+			exporter = new SceneExporter({
 				width: canvasSize.width,
 				height: canvasSize.height,
 				fps: exportFps,
@@ -213,41 +246,31 @@ export class RendererManager {
 				onProgress?.({ progress: adjustedProgress });
 			});
 
-			let cancelled = false;
-			const checkCancel = () => {
-				if (onCancel?.()) {
-					cancelled = true;
-					exporter.cancel();
-				}
-			};
+			const buffer = await exporter.export({ rootNode: scene, range });
 
-			const cancelInterval = setInterval(checkCancel, 100);
-
-			try {
-				const buffer = await exporter.export({ rootNode: scene });
-				clearInterval(cancelInterval);
-
-				if (cancelled) {
-					return { success: false, cancelled: true };
-				}
-
-				if (!buffer) {
-					return { success: false, error: "Export failed to produce buffer" };
-				}
-
-				return {
-					success: true,
-					buffer,
-				};
-			} finally {
-				clearInterval(cancelInterval);
+			if (cancelled) {
+				return { success: false, cancelled: true };
 			}
+
+			if (!buffer) {
+				return { success: false, error: "Export failed to produce buffer" };
+			}
+
+			return {
+				success: true,
+				buffer,
+			};
 		} catch (error) {
+			if (cancelled || isAudioAbortError(error)) {
+				return { success: false, cancelled: true };
+			}
 			console.error("Export failed:", error);
 			return {
 				success: false,
 				error: error instanceof Error ? error.message : "Unknown export error",
 			};
+		} finally {
+			clearInterval(cancelInterval);
 		}
 	}
 

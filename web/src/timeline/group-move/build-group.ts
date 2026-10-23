@@ -28,8 +28,24 @@ export function buildMoveGroup({
 		return null;
 	}
 
+	const requestedRefs = [anchorRef, ...selectedElements];
+	const selectedGroupIds = new Set(
+		requestedRefs.flatMap((elementRef) => {
+			const track = findTrackInSceneTracks({ tracks, trackId: elementRef.trackId });
+			const element = track?.elements.find(({ id }) => id === elementRef.elementId);
+			return element?.linkGroupId ? [element.linkGroupId] : [];
+		}),
+	);
+	const linkedRefs = [...tracks.overlay, tracks.main, ...tracks.audio].flatMap(
+		(track) =>
+			track.elements.flatMap((element) =>
+				element.linkGroupId && selectedGroupIds.has(element.linkGroupId)
+					? [{ trackId: track.id, elementId: element.id }]
+					: [],
+			),
+	);
 	const seen = new Set<string>();
-	const orderedRefs = [anchorRef, ...selectedElements].filter((elementRef) => {
+	const orderedRefs = [...requestedRefs, ...linkedRefs].filter((elementRef) => {
 		if (seen.has(elementRef.elementId)) {
 			return false;
 		}

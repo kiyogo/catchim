@@ -30,7 +30,14 @@ import type {
 import type { TimelineDragData } from "@/timeline/drag";
 import type { MediaAsset } from "@/media/types";
 import type { ProcessedMediaAsset } from "@/media/processing";
-import { roundFrameTime, type MediaTime } from "@/wasm";
+import {
+	mediaTime,
+	mediaTimeFromSeconds,
+	roundFrameTime,
+	type MediaTime,
+} from "@/wasm";
+import { preserveEmptyMainTrackStart } from "./file-drop-placement";
+import { isTrackLocked } from "@/timeline/track-capabilities";
 
 // --- Config ---
 
@@ -59,6 +66,7 @@ export interface DragDropConfig {
 		elementId: string;
 		effectType: string;
 	}) => void;
+	notifyLockedTrackDrop: () => void;
 }
 
 export interface DragDropConfigRef {
@@ -345,6 +353,10 @@ export class DragDropController {
 		const tracks = orderedTracks({ sceneTracks: this.config.getSceneTracks() });
 		const track = tracks[target.trackIndex];
 		if (!track) return;
+		if (isTrackLocked(track)) {
+			this.config.notifyLockedTrackDrop();
+			return;
+		}
 		this.config.insertElement({
 			placement: { mode: "explicit", trackId: track.id },
 			element,
@@ -506,10 +518,11 @@ export class DragDropController {
 			filesCount: files.length,
 			promise: async () => {
 				const processedAssets = await processMediaAssets({ files });
+				const nextStartTimeByTrack = new Map<TrackType, MediaTime>();
 
 				// Sequential on purpose: each iteration reads getSceneTracks()
-				// to decide placement (reuse empty main vs new track) and that
-				// decision depends on the effects of prior inserts.
+				// to choose a valid track after the previous inserts. Files of the
+				// same track type continue from the prior file's end.
 				for (const asset of processedAssets) {
 					const createdAsset = await this.config.addMediaAsset({
 						projectId,
@@ -523,8 +536,47 @@ export class DragDropController {
 
 					const sceneTracks = this.config.getSceneTracks();
 					const currentTime = this.config.getCurrentPlayheadTime();
+					const trackType: TrackType =
+						createdAsset.type === "audio" ? "audio" : "video";
+					let dropTarget = computeDropTarget({
+						elementType: createdAsset.type,
+						mouseX,
+						mouseY,
+						tracks: sceneTracks,
+						playheadTime: currentTime,
+						isExternalDrop: false,
+						elementDuration: duration,
+						pixelsPerSecond: BASE_TIMELINE_PIXELS_PER_SECOND,
+						zoomLevel: this.config.zoomLevel,
+						...(nextStartTimeByTrack.has(trackType) && {
+							startTimeOverride: nextStartTimeByTrack.get(trackType),
+						}),
+					});
+					const fps = this.config.getActiveProjectFps();
+					const requestedStartTime = mediaTimeFromSeconds({
+						seconds: Math.max(
+							0,
+							mouseX /
+								(BASE_TIMELINE_PIXELS_PER_SECOND * this.config.zoomLevel),
+						),
+					});
+					dropTarget = preserveEmptyMainTrackStart({
+						target: dropTarget,
+						mainTrackIsEmpty: sceneTracks.main.elements.length === 0,
+						mainTrackIndex: sceneTracks.overlay.length,
+						requestedStartTime: fps
+							? roundFrameTime({ time: requestedStartTime, fps })
+							: requestedStartTime,
+					});
+					if (fps) {
+						dropTarget.xPosition = roundFrameTime({
+							time: dropTarget.xPosition,
+							fps,
+						});
+					}
 
 					const reuseMainTrackId =
+						!dropTarget.isNewTrack &&
 						createdAsset.type !== "audio" &&
 						sceneTracks.overlay.length === 0 &&
 						sceneTracks.audio.length === 0 &&
@@ -540,37 +592,27 @@ export class DragDropController {
 								mediaType: createdAsset.type,
 								name: createdAsset.name,
 								duration,
-								startTime: currentTime,
+								startTime: dropTarget.xPosition,
 							}),
 						});
-						continue;
+					} else {
+						this.insertAtTarget({
+							element: buildElementFromMedia({
+								mediaId: createdAsset.id,
+								mediaType: createdAsset.type,
+								name: createdAsset.name,
+								duration,
+								startTime: dropTarget.xPosition,
+							}),
+							target: dropTarget,
+							trackType,
+						});
 					}
 
-					const dropTarget = computeDropTarget({
-						elementType: createdAsset.type,
-						mouseX,
-						mouseY,
-						tracks: sceneTracks,
-						playheadTime: currentTime,
-						isExternalDrop: true,
-						elementDuration: duration,
-						pixelsPerSecond: BASE_TIMELINE_PIXELS_PER_SECOND,
-						zoomLevel: this.config.zoomLevel,
-					});
-
-					const trackType: TrackType =
-						createdAsset.type === "audio" ? "audio" : "video";
-					this.insertAtTarget({
-						element: buildElementFromMedia({
-							mediaId: createdAsset.id,
-							mediaType: createdAsset.type,
-							name: createdAsset.name,
-							duration,
-							startTime: dropTarget.xPosition,
-						}),
-						target: dropTarget,
+					nextStartTimeByTrack.set(
 						trackType,
-					});
+						mediaTime({ ticks: dropTarget.xPosition + duration }),
+					);
 				}
 
 				return {

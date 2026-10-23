@@ -19,6 +19,7 @@ import { generateUUID } from "@/utils/id";
 
 export class ToggleSourceAudioSeparationCommand extends Command {
 	private savedState: SceneTracks | null = null;
+	private appliedState: SceneTracks | null = null;
 
 	constructor(
 		private readonly params: {
@@ -50,14 +51,13 @@ export class ToggleSourceAudioSeparationCommand extends Command {
 		const videoElement: VideoElement = sourceElement;
 
 		if (isSourceAudioSeparated({ element: videoElement })) {
-			editor.timeline.updateTracks(
-				updateSourceAudioEnabled({
-					tracks: this.savedState,
-					trackId: this.params.trackId,
-					elementId: this.params.elementId,
-					isSourceAudioEnabled: true,
-				}),
-			);
+			this.appliedState = updateSourceAudioEnabled({
+				tracks: this.savedState,
+				trackId: this.params.trackId,
+				elementId: this.params.elementId,
+				isSourceAudioEnabled: true,
+			});
+			editor.timeline.updateTracks(this.appliedState);
 			return;
 		}
 
@@ -100,14 +100,13 @@ export class ToggleSourceAudioSeparationCommand extends Command {
 			return;
 		}
 
-		editor.timeline.updateTracks(
-			updateSourceAudioEnabled({
-				tracks: appliedPlacement.updatedTracks,
-				trackId: this.params.trackId,
-				elementId: this.params.elementId,
-				isSourceAudioEnabled: false,
-			}),
-		);
+		this.appliedState = updateSourceAudioEnabled({
+			tracks: appliedPlacement.updatedTracks,
+			trackId: this.params.trackId,
+			elementId: this.params.elementId,
+			isSourceAudioEnabled: false,
+		});
+		editor.timeline.updateTracks(this.appliedState);
 	}
 
 	undo(): void {
@@ -117,6 +116,15 @@ export class ToggleSourceAudioSeparationCommand extends Command {
 
 		const editor = EditorCore.getInstance();
 		editor.timeline.updateTracks(this.savedState);
+	}
+
+	redo(): CommandResult | undefined {
+		if (!this.appliedState) {
+			return this.execute();
+		}
+		// Preserve the extracted audio track, clip, and volume-keyframe IDs.
+		EditorCore.getInstance().timeline.updateTracks(this.appliedState);
+		return undefined;
 	}
 }
 

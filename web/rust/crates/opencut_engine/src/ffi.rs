@@ -24,6 +24,54 @@ use crate::compositor::{clear_buffer_rgba, composite_layer_rgba, BlendMode, Quad
 
 use std::alloc::{alloc, dealloc, Layout};
 
+/// Returns -1 for invalid input/output, 0 for an empty interval, 1 for a window.
+/// On success writes [context_start, source_offset, source_duration, timeline_start].
+///
+/// # Safety
+/// `out_window` must point to four writable, aligned `f64` values.
+#[no_mangle]
+pub unsafe extern "C" fn ocw_audio_plan_buffer_schedule(
+    clip_start: f64,
+    clip_duration: f64,
+    source_start: f64,
+    playback_rate: f64,
+    buffer_start: f64,
+    buffer_duration: f64,
+    requested_start: f64,
+    context_offset: f64,
+    context_now: f64,
+    out_window: *mut f64,
+) -> i32 {
+    if out_window.is_null() {
+        return -1;
+    }
+    match crate::audio::plan_audio_buffer_schedule(crate::audio::AudioScheduleRequest {
+        clip_start,
+        clip_duration,
+        source_start,
+        playback_rate,
+        buffer_start,
+        buffer_duration,
+        requested_start,
+        context_offset,
+        context_now,
+    }) {
+        Ok(Some(window)) => {
+            unsafe {
+                slice::from_raw_parts_mut(out_window, 4).copy_from_slice(&[
+                    window.context_start,
+                    window.source_offset,
+                    window.source_duration,
+                    window.timeline_start,
+                ]);
+            }
+            1
+        }
+        Ok(None) => 0,
+        Err(_) => -1,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn oc_malloc(size: usize) -> *mut u8 {
     let layout = match Layout::from_size_align(size + 8, 8) {
@@ -63,6 +111,53 @@ unsafe fn c_str_to_str<'a>(ptr: *const c_char) -> &'a str {
 }
 
 // Time APIs
+// Browser integer values must remain exactly representable at the C-ABI boundary.
+fn web_nonnegative_integer(value: f64) -> Option<i64> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > 9_007_199_254_740_991.0 {
+        return None;
+    }
+    Some(value as i64)
+}
+
+#[no_mangle]
+pub extern "C" fn ocw_export_frame_count(duration: f64, num: u32, den: u32) -> f64 {
+    let Some(duration) = web_nonnegative_integer(duration) else { return -1.0; };
+    let Some(plan) = crate::export::ExportTiming::new(duration, FrameRate { numerator: num, denominator: den }) else { return -1.0; };
+    if plan.frame_count() > 9_007_199_254_740_991 { return -1.0; }
+    plan.frame_count() as f64
+}
+
+#[no_mangle]
+pub extern "C" fn ocw_export_frame_sample(duration: f64, num: u32, den: u32, index: f64, out: *mut f64) -> i32 {
+    if out.is_null() { return -1; }
+    let (Some(duration), Some(index)) = (web_nonnegative_integer(duration), web_nonnegative_integer(index)) else { return -1; };
+    let Some(plan) = crate::export::ExportTiming::new(duration, FrameRate { numerator: num, denominator: den }) else { return -1; };
+    let Some(sample) = plan.sample(index as u64) else { return 0; };
+    unsafe {
+        let output = slice::from_raw_parts_mut(out, 3);
+        output.copy_from_slice(&[sample.time_ticks as f64, sample.timestamp_seconds, sample.duration_seconds]);
+    }
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn ocw_timeline_compact_gaps(starts: *const f64, durations: *const f64, count: usize, out: *mut f64) -> i32 {
+    if count == 0 { return 1; }
+    if starts.is_null() || durations.is_null() || out.is_null() || count > 1_000_000 { return -1; }
+    let starts = unsafe { slice::from_raw_parts(starts, count) };
+    let durations = unsafe { slice::from_raw_parts(durations, count) };
+    let mut spans = Vec::with_capacity(count);
+    for (&start, &duration) in starts.iter().zip(durations) {
+        let (Some(start), Some(duration)) = (web_nonnegative_integer(start), web_nonnegative_integer(duration)) else { return -1; };
+        if start.checked_add(duration).filter(|&end| end <= 9_007_199_254_740_991).is_none() { return -1; }
+        spans.push((start, duration));
+    }
+    let Some(result) = crate::gap_edit::compact_track_gaps(&spans) else { return -1; };
+    let output = unsafe { slice::from_raw_parts_mut(out, count) };
+    for (output, start) in output.iter_mut().zip(result) { *output = start as f64; }
+    1
+}
+
 #[no_mangle]
 pub extern "C" fn oc_time_ticks_per_second() -> f64 {
     TICKS_PER_SECOND as f64
@@ -747,30 +842,17 @@ pub extern "C" fn ocw_scene_build_display_list(
 #[no_mangle]
 pub extern "C" fn ocw_subtitles_parse_timestamp(ts_ptr: *const c_char) -> f64 {
     let s = unsafe { c_str_to_str(ts_ptr) };
-    // Formats like "00:01:23,456"
-    let clean = s.replace(',', ".");
-    let parts: Vec<&str> = clean.split(':').collect();
-    if parts.len() == 3 {
-        let h: f64 = parts[0].parse().unwrap_or(0.0);
-        let m: f64 = parts[1].parse().unwrap_or(0.0);
-        let sec: f64 = parts[2].parse().unwrap_or(0.0);
-        (h * 3600.0 + m * 60.0 + sec) * TICKS_PER_SECOND as f64
-    } else {
-        0.0
-    }
+    crate::time::parse_subtitle_timestamp(s).map(|ticks| ticks as f64).unwrap_or(-1.0)
 }
 
 #[no_mangle]
 pub extern "C" fn ocw_subtitles_format_timestamp(ticks: f64, out_buf: *mut c_char, out_len: usize) -> i32 {
-    let sec = (ticks / TICKS_PER_SECOND as f64).max(0.0);
-    let total_s = sec.floor() as i64;
-    let ms = ((sec - total_s as f64) * 1000.0).round() as i64;
-    let h = total_s / 3600;
-    let m = (total_s % 3600) / 60;
-    let s = total_s % 60;
-    let formatted = format!("{:02}:{:02}:{:02},{:03}", h, m, s, ms);
+    if out_buf.is_null() || out_len == 0 { return 0; }
+    let Some(ticks) = web_nonnegative_integer(ticks) else { return 0; };
+    let formatted = crate::time::format_subtitle_timestamp(ticks);
     let bytes = formatted.as_bytes();
-    let copy_len = bytes.len().min(out_len - 1);
+    if bytes.len() >= out_len { return 0; }
+    let copy_len = bytes.len();
     unsafe {
         let dest = slice::from_raw_parts_mut(out_buf as *mut u8, out_len);
         dest[..copy_len].copy_from_slice(&bytes[..copy_len]);

@@ -21,7 +21,6 @@ export class VideoCache {
 	private sinks = new Map<string, VideoSinkData>();
 	private initPromises = new Map<string, Promise<void>>();
 	private frameChain = new Map<string, Promise<unknown>>();
-	private seekGenerations = new Map<string, number>();
 
 	async getFrameAt({
 		mediaId,
@@ -37,16 +36,11 @@ export class VideoCache {
 		const sinkData = this.sinks.get(mediaId);
 		if (!sinkData) return null;
 
-		const generation = (this.seekGenerations.get(mediaId) ?? 0) + 1;
-		this.seekGenerations.set(mediaId, generation);
-
 		const previous = this.frameChain.get(mediaId) ?? Promise.resolve();
-		const current = previous.then(() => {
-			if (this.seekGenerations.get(mediaId) !== generation) {
-				return sinkData.currentFrame ?? null;
-			}
-			return this.resolveFrame({ sinkData, time });
-		});
+		// One decoder iterator belongs to each media asset. Keep simultaneous
+		// requests (for example a PIP clip and its blur backdrop) in order so
+		// neither request silently receives the other node's cached frame.
+		const current = previous.then(() => this.resolveFrame({ sinkData, time }));
 		this.frameChain.set(
 			mediaId,
 			current.catch(() => {}),
@@ -313,7 +307,6 @@ export class VideoCache {
 
 		this.initPromises.delete(mediaId);
 		this.frameChain.delete(mediaId);
-		this.seekGenerations.delete(mediaId);
 	}
 
 	clearAll(): void {

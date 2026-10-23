@@ -313,6 +313,35 @@ describe("resolveTrackPlacement", () => {
 		).toBeNull();
 	});
 
+	test("explicit and automatic placement never use a locked track", () => {
+		const lockedTrack = {
+			...buildTrack({ id: "text-locked", type: "text" }),
+			locked: true,
+		};
+		const openTrack = buildTrack({ id: "text-open", type: "text" });
+		const tracks = buildSceneTracks({ overlay: [lockedTrack, openTrack] });
+		const span = [buildTimeSpan({ startTime: 1, duration: 1 })];
+
+		expect(
+			resolveTrackPlacement({
+				tracks,
+				elementType: "text",
+				timeSpans: span,
+				strategy: { type: "explicit", trackId: lockedTrack.id },
+			}),
+		).toBeNull();
+		const firstAvailable = resolveTrackPlacement({
+				tracks,
+				elementType: "text",
+				timeSpans: span,
+				strategy: { type: "firstAvailable" },
+			});
+		expect(firstAvailable?.kind).toBe("existingTrack");
+		if (firstAvailable?.kind === "existingTrack") {
+			expect(firstAvailable.trackId).toBe(openTrack.id);
+		}
+	});
+
 	test("firstAvailable picks the first compatible track without overlap", () => {
 		const tracks = buildSceneTracks({
 			overlay: [

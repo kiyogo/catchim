@@ -17,6 +17,7 @@ import {
 import { useTranslation } from "@/i18n";
 import { warmNativeTimelineCore } from "@/native/opencut-core";
 import { resetBrowserHistory } from "@/native/browser-editor-core";
+import { McpEditorBridge } from "@/mcp/editor-bridge";
 
 interface EditorProviderProps {
 	projectId: string;
@@ -134,6 +135,7 @@ export function EditorProvider({ projectId, children }: EditorProviderProps) {
 	return (
 		<>
 			<EditorRuntimeBindings />
+			<McpEditorBridge />
 			{children}
 		</>
 	);

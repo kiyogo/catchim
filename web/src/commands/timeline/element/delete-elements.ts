@@ -2,6 +2,8 @@ import { Command, type CommandResult } from "@/commands/base-command";
 import type { SceneTracks } from "@/timeline";
 import { EditorCore } from "@/core";
 import type { TimelineTrack } from "@/timeline";
+import { findTrackInSceneTracks } from "@/timeline/track-element-update";
+import { isTrackLocked } from "@/timeline/track-capabilities";
 
 function removeTrackElements<TTrack extends TimelineTrack>({
 	track,
@@ -37,17 +39,26 @@ export class DeleteElementsCommand extends Command {
 	execute(): CommandResult | undefined {
 		const editor = EditorCore.getInstance();
 		this.savedState = editor.scenes.getActiveScene().tracks;
+		const editableElements = this.elements.filter(({ trackId }) => {
+			const track = findTrackInSceneTracks({ tracks: this.savedState!, trackId });
+			return track != null && !isTrackLocked(track);
+		});
+		if (editableElements.length === 0) return;
+		const retainedLockedSelection = this.elements.filter(({ trackId }) => {
+			const track = findTrackInSceneTracks({ tracks: this.savedState!, trackId });
+			return track != null && isTrackLocked(track);
+		});
 
 		const updatedTracks: SceneTracks = {
 			overlay: this.savedState.overlay.map((track) =>
-				removeTrackElements({ track, elements: this.elements }),
+				removeTrackElements({ track, elements: editableElements }),
 			),
 			main: removeTrackElements({
 				track: this.savedState.main,
-				elements: this.elements,
+				elements: editableElements,
 			}),
 			audio: this.savedState.audio.map((track) =>
-				removeTrackElements({ track, elements: this.elements }),
+				removeTrackElements({ track, elements: editableElements }),
 			),
 		};
 
@@ -55,7 +66,7 @@ export class DeleteElementsCommand extends Command {
 
 		return {
 			selection: {
-				selectedElements: [],
+				selectedElements: retainedLockedSelection,
 				selectedKeyframes: [],
 				keyframeSelectionAnchor: null,
 				selectedMaskPoints: null,

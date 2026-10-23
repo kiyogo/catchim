@@ -96,36 +96,16 @@ const enforceRules: ElementUpdateRule[] = [
 	},
 	{
 		triggers: ["startTime"],
-		apply: ({ element, context }) => {
+		apply: ({ element }) => {
 			const requestedStartTime =
 				element.startTime < ZERO_MEDIA_TIME
 					? ZERO_MEDIA_TIME
 					: element.startTime;
-			if (context.trackId !== context.tracks.main.id) {
-				return {
-					element: {
-						...element,
-						startTime: requestedStartTime,
-					},
-				};
-			}
-
-			const earliestElement = context.tracks.main.elements
-				.filter((candidate) => candidate.id !== element.id)
-				.reduce<TimelineElement | null>((earliest, candidate) => {
-					if (!earliest || candidate.startTime < earliest.startTime) {
-						return candidate;
-					}
-					return earliest;
-				}, null);
 
 			return {
 				element: {
 					...element,
-					startTime:
-						!earliestElement || requestedStartTime <= earliestElement.startTime
-							? ZERO_MEDIA_TIME
-							: requestedStartTime,
+					startTime: requestedStartTime,
 				},
 			};
 		},

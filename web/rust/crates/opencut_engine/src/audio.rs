@@ -1,3 +1,123 @@
+#[derive(Debug, Clone, Copy)]
+pub struct AudioScheduleRequest {
+    pub clip_start: f64,
+    pub clip_duration: f64,
+    pub source_start: f64,
+    pub playback_rate: f64,
+    pub buffer_start: f64,
+    pub buffer_duration: f64,
+    pub requested_start: f64,
+    /// Add this offset to a timeline time to obtain its AudioContext time.
+    pub context_offset: f64,
+    pub context_now: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AudioScheduleWindow {
+    pub context_start: f64,
+    pub source_offset: f64,
+    pub source_duration: f64,
+    pub timeline_start: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioScheduleError {
+    InvalidInput,
+    NonFiniteRange,
+}
+
+/// Intersect a decoded source buffer with the visible clip and the playback clock.
+/// Web Audio's start(offset, duration) arguments use source-buffer seconds, even
+/// when playback_rate changes the number of audible seconds those samples occupy.
+pub fn plan_audio_buffer_schedule(
+    request: AudioScheduleRequest,
+) -> Result<Option<AudioScheduleWindow>, AudioScheduleError> {
+    let AudioScheduleRequest {
+        clip_start,
+        clip_duration,
+        source_start,
+        playback_rate,
+        buffer_start,
+        buffer_duration,
+        requested_start,
+        context_offset,
+        context_now,
+    } = request;
+    if ![
+        clip_start,
+        clip_duration,
+        source_start,
+        playback_rate,
+        buffer_start,
+        buffer_duration,
+        requested_start,
+        context_offset,
+        context_now,
+    ]
+    .iter()
+    .all(|value| value.is_finite())
+        || clip_start < 0.0
+        || clip_duration < 0.0
+        || source_start < 0.0
+        || playback_rate <= 0.0
+        || buffer_duration < 0.0
+        || requested_start < 0.0
+        || context_now < 0.0
+    {
+        return Err(AudioScheduleError::InvalidInput);
+    }
+    if clip_duration == 0.0 || buffer_duration == 0.0 {
+        return Ok(None);
+    }
+
+    let clip_end = clip_start + clip_duration;
+    let buffer_timeline_start = clip_start + (buffer_start - source_start) / playback_rate;
+    let buffer_timeline_end = buffer_timeline_start + buffer_duration / playback_rate;
+    let current_timeline_time = context_now - context_offset;
+    if ![
+        clip_end,
+        buffer_timeline_start,
+        buffer_timeline_end,
+        current_timeline_time,
+    ]
+    .iter()
+    .all(|value| value.is_finite())
+    {
+        return Err(AudioScheduleError::NonFiniteRange);
+    }
+
+    let timeline_start = clip_start
+        .max(buffer_timeline_start)
+        .max(requested_start)
+        .max(current_timeline_time);
+    let timeline_end = clip_end.min(buffer_timeline_end);
+    if timeline_start >= timeline_end {
+        return Ok(None);
+    }
+
+    let context_start = (timeline_start + context_offset).max(context_now);
+    let source_offset =
+        ((timeline_start - buffer_timeline_start) * playback_rate).clamp(0.0, buffer_duration);
+    let source_duration =
+        ((timeline_end - timeline_start) * playback_rate).min(buffer_duration - source_offset);
+    if ![context_start, source_offset, source_duration]
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return Err(AudioScheduleError::NonFiniteRange);
+    }
+    if source_duration <= 0.0 {
+        return Ok(None);
+    }
+
+    Ok(Some(AudioScheduleWindow {
+        context_start,
+        source_offset,
+        source_duration,
+        timeline_start,
+    }))
+}
+
 pub fn apply_gain_ramp(samples: &mut [f32], start_gain: f32, end_gain: f32) {
     let count = samples.len();
     if count == 0 {
@@ -323,6 +443,136 @@ pub fn mix_channel_retime(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn schedule_request() -> AudioScheduleRequest {
+        AudioScheduleRequest {
+            clip_start: 10.0,
+            clip_duration: 2.0,
+            source_start: 4.0,
+            playback_rate: 1.0,
+            buffer_start: 4.0,
+            buffer_duration: 3.0,
+            requested_start: 10.0,
+            context_offset: 90.0,
+            context_now: 99.0,
+        }
+    }
+
+    #[test]
+    fn test_audio_schedule_clips_buffer_at_trimmed_end() {
+        let window = plan_audio_buffer_schedule(schedule_request())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            window,
+            AudioScheduleWindow {
+                context_start: 100.0,
+                source_offset: 0.0,
+                source_duration: 2.0,
+                timeline_start: 10.0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_audio_schedule_scales_late_offsets_and_duration_by_rate() {
+        for rate in [0.5, 2.0] {
+            let window = plan_audio_buffer_schedule(AudioScheduleRequest {
+                playback_rate: rate,
+                buffer_duration: 10.0,
+                context_now: 100.5,
+                ..schedule_request()
+            })
+            .unwrap()
+            .unwrap();
+            assert_eq!(window.context_start, 100.5);
+            assert_eq!(window.timeline_start, 10.5);
+            assert_eq!(window.source_offset, 0.5 * rate);
+            assert_eq!(window.source_duration, 1.5 * rate);
+        }
+    }
+
+    #[test]
+    fn test_audio_schedule_intersects_seek_start_and_source_trim() {
+        let window = plan_audio_buffer_schedule(AudioScheduleRequest {
+            buffer_start: 3.0,
+            buffer_duration: 4.0,
+            requested_start: 11.0,
+            ..schedule_request()
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(window.context_start, 101.0);
+        assert_eq!(window.source_offset, 2.0);
+        assert_eq!(window.source_duration, 1.0);
+    }
+
+    #[test]
+    fn test_audio_schedule_does_not_play_outside_half_open_clip() {
+        for request in [
+            AudioScheduleRequest {
+                buffer_start: 6.0,
+                ..schedule_request()
+            },
+            AudioScheduleRequest {
+                buffer_start: 1.0,
+                ..schedule_request()
+            },
+            AudioScheduleRequest {
+                context_now: 102.0,
+                ..schedule_request()
+            },
+            AudioScheduleRequest {
+                requested_start: 12.0,
+                ..schedule_request()
+            },
+            AudioScheduleRequest {
+                buffer_duration: 0.0,
+                ..schedule_request()
+            },
+            AudioScheduleRequest {
+                clip_duration: 0.0,
+                ..schedule_request()
+            },
+        ] {
+            assert_eq!(plan_audio_buffer_schedule(request), Ok(None));
+        }
+    }
+
+    #[test]
+    fn test_audio_schedule_rejects_invalid_and_overflowing_inputs() {
+        for request in [
+            AudioScheduleRequest {
+                playback_rate: 0.0,
+                ..schedule_request()
+            },
+            AudioScheduleRequest {
+                playback_rate: f64::NAN,
+                ..schedule_request()
+            },
+            AudioScheduleRequest {
+                clip_duration: -1.0,
+                ..schedule_request()
+            },
+            AudioScheduleRequest {
+                buffer_duration: f64::INFINITY,
+                ..schedule_request()
+            },
+        ] {
+            assert_eq!(
+                plan_audio_buffer_schedule(request),
+                Err(AudioScheduleError::InvalidInput)
+            );
+        }
+        assert_eq!(
+            plan_audio_buffer_schedule(AudioScheduleRequest {
+                clip_start: f64::MAX,
+                clip_duration: f64::MAX,
+                ..schedule_request()
+            }),
+            Err(AudioScheduleError::NonFiniteRange)
+        );
+    }
 
     #[test]
     fn test_gain_ramp() {

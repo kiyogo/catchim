@@ -29,6 +29,7 @@ import { SpeedTab } from "@/speed/components/speed-tab";
 import { GraphicTab } from "@/graphics/components/graphic-tab";
 import { OcShapesIcon, OcSpeechIcon } from "@/components/icons";
 import { TextToSpeechTab } from "@/text/components/text-to-speech-tab";
+import { MotionTab } from "@/motion/components/motion-tab";
 
 const TRANSFORM_PARAM_KEYS = [
 	"transform.positionX",
@@ -93,6 +94,19 @@ function buildTransformTab({
 				sectionKey="transform"
 			/>
 		),
+	};
+}
+
+function buildMotionTab({
+	element,
+}: {
+	element: VisualElement;
+}): PropertiesTabDef {
+	return {
+		id: "motion",
+		label: "Motion",
+		icon: <HugeiconsIcon icon={MagicWand05Icon} size={16} />,
+		content: ({ trackId }) => <MotionTab element={element} trackId={trackId} />,
 	};
 }
 
@@ -241,6 +255,7 @@ function getTextConfig({
 		defaultTab: "text",
 		tabs: [
 			buildTextTab({ element }),
+			buildMotionTab({ element }),
 			buildTtsTab({ element }),
 			buildTransformTab({ element }),
 			buildBlendingTab({ element }),
@@ -260,6 +275,7 @@ function getVideoConfig({
 		defaultTab: "transform",
 		tabs: [
 			buildTransformTab({ element }),
+			buildMotionTab({ element }),
 			...(showAudioTab ? [buildAudioTab({ element })] : []),
 			buildSpeedTab({ element }),
 			buildBlendingTab({ element }),
@@ -278,6 +294,7 @@ function getImageConfig({
 		defaultTab: "transform",
 		tabs: [
 			buildTransformTab({ element }),
+			buildMotionTab({ element }),
 			buildBlendingTab({ element }),
 			buildMasksTab({ element }),
 			buildClipEffectsTab({ element }),
@@ -294,6 +311,7 @@ function getStickerConfig({
 		defaultTab: "transform",
 		tabs: [
 			buildTransformTab({ element }),
+			buildMotionTab({ element }),
 			buildBlendingTab({ element }),
 			buildClipEffectsTab({ element }),
 		],
@@ -310,6 +328,7 @@ function getGraphicConfig({
 		tabs: [
 			buildGraphicTab({ element }),
 			buildTransformTab({ element }),
+			buildMotionTab({ element }),
 			buildBlendingTab({ element }),
 			buildMasksTab({ element }),
 			buildClipEffectsTab({ element }),

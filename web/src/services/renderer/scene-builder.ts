@@ -274,13 +274,26 @@ export function buildScene({
 }: BuildSceneParams) {
 	const rootNode = new RootNode({ duration });
 	const mediaMap = new Map(mediaAssets.map((m) => [m.id, m]));
+	const visibleTrackCandidates = [...tracks.overlay, tracks.main];
+	const hasVisualSolo = visibleTrackCandidates.some(
+		(track) => track.solo === true,
+	);
 
 	const visibleTracks = [
-		...tracks.overlay.filter((track) => !("hidden" in track && track.hidden)),
-		...(!tracks.main.hidden ? [tracks.main] : []),
+		...tracks.overlay.filter(
+			(track) =>
+				!("hidden" in track && track.hidden) &&
+				(!hasVisualSolo || track.solo === true),
+		),
+		...(!tracks.main.hidden && (!hasVisualSolo || tracks.main.solo === true)
+			? [tracks.main]
+			: []),
 	];
 	const orderedTracksBottomToTop = visibleTracks.slice().reverse();
-	const mainTrack = tracks.main.hidden ? undefined : tracks.main;
+	const mainTrack =
+		tracks.main.hidden || (hasVisualSolo && tracks.main.solo !== true)
+			? undefined
+			: tracks.main;
 
 	const allNodes = buildTrackNodes({
 		tracks: orderedTracksBottomToTop,

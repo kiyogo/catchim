@@ -9,6 +9,8 @@ export interface Effect {
 
 export type EffectUniformValue = number | number[];
 
+export type EffectCategory = "blur" | "color" | "keying" | "stylize";
+
 export interface EffectPass {
 	shader: string;
 	uniforms: Record<string, EffectUniformValue>;
@@ -36,6 +38,7 @@ export interface EffectDefinition {
 	type: string;
 	name: string;
 	keywords: string[];
+	category?: EffectCategory;
 	params: ParamDefinition[];
 	renderer: EffectRendererConfig;
 }

@@ -31,6 +31,7 @@ import { formatNumberForDisplay } from "@/utils/math";
 import { OcSquarePlusIcon } from "@/components/icons";
 import type { TCanvasSize } from "@/project/types";
 import { isLanguage, LANGUAGE_OPTIONS, useTranslation } from "@/i18n";
+import { McpSettingsView } from "@/mcp/settings-view";
 import {
 	Dialog,
 	DialogContent,
@@ -40,10 +41,10 @@ import {
 	DialogFooter,
 } from "@/components/ui/dialog";
 
-type SettingsView = "project-info" | "background";
+type SettingsView = "project-info" | "background" | "mcp";
 
 function isSettingsView(value: string): value is SettingsView {
-	return value === "project-info" || value === "background";
+	return value === "project-info" || value === "background" || value === "mcp";
 }
 
 const PRESET_LABELS: Record<string, string> = {
@@ -226,6 +227,7 @@ export function SettingsView() {
 						<TabsTrigger value="background">
 							{t("settings.background")}
 						</TabsTrigger>
+						<TabsTrigger value="mcp">MCP</TabsTrigger>
 					</TabsList>
 				</Tabs>
 			}
@@ -397,6 +399,7 @@ export function SettingsView() {
 				</div>
 			)}
 			{view === "background" && <BackgroundContent />}
+			{view === "mcp" && <McpSettingsView />}
 		</PanelView>
 	);
 }

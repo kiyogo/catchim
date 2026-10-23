@@ -1,5 +1,8 @@
 export { InsertElementCommand } from "./insert-element";
+export { ApplyMotionPresetCommand } from "./apply-motion-preset";
 export { DeleteElementsCommand } from "./delete-elements";
+export { RippleDeleteElementsCommand } from "./ripple-delete-elements";
+export { LinkElementsCommand } from "./link-elements";
 export { DuplicateElementsCommand } from "./duplicate-elements";
 export { SplitElementsCommand } from "./split-elements";
 export { UpdateElementsCommand } from "./update-elements";

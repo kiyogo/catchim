@@ -1,17 +1,17 @@
 import { useEditor } from "@/editor/use-editor";
 import { useElementSelection } from "@/timeline/hooks/element/use-element-selection";
 import {
-	TooltipProvider,
-	Tooltip,
-	TooltipTrigger,
-	TooltipContent,
+  TooltipProvider,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import {
-	SplitButton,
-	SplitButtonLeft,
-	SplitButtonRight,
-	SplitButtonSeparator,
+  SplitButton,
+  SplitButtonLeft,
+  SplitButtonRight,
+  SplitButtonSeparator,
 } from "@/components/ui/split-button";
 import { Slider } from "@/components/ui/slider";
 import { TIMELINE_ZOOM_BUTTON_FACTOR } from "./interaction";
@@ -20,30 +20,30 @@ import { sliderToZoom, zoomToSlider } from "@/timeline/zoom-utils";
 import { ScenesView } from "@/components/editor/scenes-view";
 import { type TActionWithOptionalArgs, invokeAction } from "@/actions";
 import {
-	canToggleSourceAudio,
-	getSourceAudioActionLabel,
-	isSourceAudioSeparated,
+  canToggleSourceAudio,
+  getSourceAudioActionLabel,
+  isSourceAudioSeparated,
 } from "@/timeline/audio-separation";
 import { hasMediaId } from "@/timeline";
 import { cn } from "@/utils/ui";
 import { useTimelineStore } from "@/timeline/timeline-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-	Bookmark02Icon,
-	Delete02Icon,
-	SnowIcon,
-	ScissorIcon,
-	MagnetIcon,
-	SearchAddIcon,
-	SearchMinusIcon,
-	Copy01Icon,
-	AlignLeftIcon,
-	AlignRightIcon,
-	Link02Icon,
-	Layers01Icon,
-	Chart03Icon,
-	Unlink02Icon,
-	MusicNote01Icon,
+  Bookmark02Icon,
+  Delete02Icon,
+  SnowIcon,
+  ScissorIcon,
+  MagnetIcon,
+  SearchAddIcon,
+  SearchMinusIcon,
+  Copy01Icon,
+  AlignLeftIcon,
+  AlignRightIcon,
+  Link02Icon,
+  Layers01Icon,
+  Chart03Icon,
+  Unlink02Icon,
+  MusicNote01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { OcRippleIcon } from "@/components/icons";
@@ -53,436 +53,524 @@ import { useGraphEditorController } from "./graph-editor/use-controller";
 import { useTranslation } from "@/i18n";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Clapperboard, LoaderCircle } from "lucide-react";
 import { createAudioContext } from "@/media/audio";
 import { detectAudioBeatsAsync } from "@/media/beat-detection";
+import { detectSceneCuts } from "@/media/scene-cut-detection";
 import {
-	addMediaTime,
-	mediaTimeFromSeconds,
-	TICKS_PER_SECOND,
-	type MediaTime,
+  addMediaTime,
+  mediaTimeFromSeconds,
+  TICKS_PER_SECOND,
+  type MediaTime,
 } from "@/wasm";
 import { BatchCommand } from "@/commands";
 import { ToggleBookmarkCommand } from "@/commands/scene";
 
 export function TimelineToolbar({
-	zoomLevel,
-	minZoom,
-	setZoomLevel,
+  zoomLevel,
+  minZoom,
+  setZoomLevel,
 }: {
-	zoomLevel: number;
-	minZoom: number;
-	setZoomLevel: ({ zoom }: { zoom: number }) => void;
+  zoomLevel: number;
+  minZoom: number;
+  setZoomLevel: ({ zoom }: { zoom: number }) => void;
 }) {
-	const handleZoom = ({ direction }: { direction: "in" | "out" }) => {
-		const newZoomLevel =
-			direction === "in"
-				? Math.min(TIMELINE_ZOOM_MAX, zoomLevel * TIMELINE_ZOOM_BUTTON_FACTOR)
-				: Math.max(minZoom, zoomLevel / TIMELINE_ZOOM_BUTTON_FACTOR);
-		setZoomLevel({ zoom: newZoomLevel });
-	};
+  const handleZoom = ({ direction }: { direction: "in" | "out" }) => {
+    const newZoomLevel =
+      direction === "in"
+        ? Math.min(TIMELINE_ZOOM_MAX, zoomLevel * TIMELINE_ZOOM_BUTTON_FACTOR)
+        : Math.max(minZoom, zoomLevel / TIMELINE_ZOOM_BUTTON_FACTOR);
+    setZoomLevel({ zoom: newZoomLevel });
+  };
 
-	return (
-		<ScrollArea className="scrollbar-hidden">
-			<div className="flex h-10 items-center justify-between border-b px-2 py-1">
-				<ToolbarLeftSection />
+  return (
+    <ScrollArea className="scrollbar-hidden">
+      <div className="flex h-10 items-center justify-between border-b px-2 py-1">
+        <ToolbarLeftSection />
 
-				<SceneSelector />
+        <SceneSelector />
 
-				<ToolbarRightSection
-					zoomLevel={zoomLevel}
-					minZoom={minZoom}
-					onZoomChange={(zoom) => setZoomLevel({ zoom })}
-					onZoom={handleZoom}
-				/>
-			</div>
-		</ScrollArea>
-	);
+        <ToolbarRightSection
+          zoomLevel={zoomLevel}
+          minZoom={minZoom}
+          onZoomChange={(zoom) => setZoomLevel({ zoom })}
+          onZoom={handleZoom}
+        />
+      </div>
+    </ScrollArea>
+  );
 }
 
 function ToolbarLeftSection() {
-	const { t } = useTranslation();
-	const editor = useEditor();
-	const mediaAssets = useEditor((currentEditor) =>
-		currentEditor.media.getAssets(),
-	);
-	const { selectedElements } = useElementSelection();
-	const graphEditor = useGraphEditorController();
-	const isCurrentlyBookmarked = useEditor((e) =>
-		e.scenes.isBookmarked({ time: e.playback.getCurrentTime() }),
-	);
-	const selectedElement =
-		selectedElements.length === 1
-			? (editor.timeline.getElementsWithTracks({
-					elements: selectedElements,
-				})[0] ?? null)
-			: null;
-	const selectedMediaAsset = (() => {
-		if (!selectedElement) {
-			return null;
-		}
+  const { t } = useTranslation();
+  const editor = useEditor();
+  const mediaAssets = useEditor((currentEditor) =>
+    currentEditor.media.getAssets(),
+  );
+  const { selectedElements } = useElementSelection();
+  const graphEditor = useGraphEditorController();
+  const isCurrentlyBookmarked = useEditor((e) =>
+    e.scenes.isBookmarked({ time: e.playback.getCurrentTime() }),
+  );
+  const selectedElement =
+    selectedElements.length === 1
+      ? (editor.timeline.getElementsWithTracks({
+          elements: selectedElements,
+        })[0] ?? null)
+      : null;
+  const selectedMediaAsset = (() => {
+    if (!selectedElement) {
+      return null;
+    }
 
-		const { element } = selectedElement;
-		if (!hasMediaId(element)) {
-			return null;
-		}
+    const { element } = selectedElement;
+    if (!hasMediaId(element)) {
+      return null;
+    }
 
-		return mediaAssets.find((asset) => asset.id === element.mediaId) ?? null;
-	})();
-	const canToggleSelectedSourceAudio =
-		!!selectedElement &&
-		canToggleSourceAudio(selectedElement.element, selectedMediaAsset);
-	const sourceAudioLabel =
-		selectedElement?.element.type === "video"
-			? getSourceAudioActionLabel({
-					element: selectedElement.element,
-				}) === "Recover audio"
-				? t("timeline.recoverAudio")
-				: t("timeline.extractAudio")
-			: t("timeline.extractAudio");
-	const isSelectedSourceAudioSeparated =
-		selectedElement?.element.type === "video" &&
-		isSourceAudioSeparated({
-			element: selectedElement.element,
-		});
-	const [isDetectingBeats, setIsDetectingBeats] = useState(false);
-	const canDetectBeats =
-		selectedElement?.element.type === "audio" &&
-		selectedMediaAsset?.type === "audio";
+    return mediaAssets.find((asset) => asset.id === element.mediaId) ?? null;
+  })();
+  const canToggleSelectedSourceAudio =
+    !!selectedElement &&
+    canToggleSourceAudio(selectedElement.element, selectedMediaAsset);
+  const sourceAudioLabel =
+    selectedElement?.element.type === "video"
+      ? getSourceAudioActionLabel({
+          element: selectedElement.element,
+        }) === "Recover audio"
+        ? t("timeline.recoverAudio")
+        : t("timeline.extractAudio")
+      : t("timeline.extractAudio");
+  const isSelectedSourceAudioSeparated =
+    selectedElement?.element.type === "video" &&
+    isSourceAudioSeparated({
+      element: selectedElement.element,
+    });
+  const [isDetectingBeats, setIsDetectingBeats] = useState(false);
+  const [isDetectingSceneCuts, setIsDetectingSceneCuts] = useState(false);
+  const canDetectBeats =
+    selectedElement?.element.type === "audio" &&
+    selectedMediaAsset?.type === "audio";
+  const canDetectSceneCuts =
+    selectedElement?.element.type === "video" &&
+    selectedMediaAsset?.type === "video";
 
-	const handleDetectBeats = async () => {
-		if (
-			!canDetectBeats ||
-			!selectedElement ||
-			selectedElement.element.type !== "audio" ||
-			!selectedMediaAsset
-		)
-			return;
+  const handleDetectBeats = async () => {
+    if (
+      !canDetectBeats ||
+      !selectedElement ||
+      selectedElement.element.type !== "audio" ||
+      !selectedMediaAsset
+    )
+      return;
 
-		setIsDetectingBeats(true);
-		let audioContext: AudioContext | null = null;
-		try {
-			audioContext = createAudioContext();
-			const audioBuffer = await audioContext.decodeAudioData(
-				await selectedMediaAsset.file.arrayBuffer(),
-			);
-			const element = selectedElement.element;
-			const speed = Math.max(0.01, element.retime?.rate ?? 1);
-			const ticksPerSecond = TICKS_PER_SECOND;
-			const trimStartSeconds = element.trimStart / ticksPerSecond;
-			const trimEndSeconds = Math.min(
-				audioBuffer.duration,
-				trimStartSeconds + (element.duration / ticksPerSecond) * speed,
-			);
-			const detected = await detectAudioBeatsAsync({
-				buffer: audioBuffer,
-				startSeconds: trimStartSeconds,
-				endSeconds: trimEndSeconds,
-			});
-			const markerTimes: MediaTime[] = [];
-			for (const sourceSeconds of detected) {
-				const clipSeconds = (sourceSeconds - trimStartSeconds) / speed;
-				const time = addMediaTime({
-					a: element.startTime,
-					b: mediaTimeFromSeconds({ seconds: clipSeconds }),
-				});
-				if (!editor.scenes.isBookmarked({ time })) {
-					markerTimes.push(time);
-				}
-			}
-			if (markerTimes.length > 0) {
-				editor.command.execute({
-					command: new BatchCommand(
-						markerTimes.map((time) => new ToggleBookmarkCommand(time)),
-					),
-				});
-			}
-			const added = markerTimes.length;
-			toast.success(
-				added > 0
-					? t("timeline.beatsMarked").replace("{count}", String(added))
-					: t("timeline.noBeatsFound"),
-			);
-		} catch (error) {
-			console.error("Failed to detect audio beats:", error);
-			toast.error(t("timeline.beatDetectionFailed"));
-		} finally {
-			if (audioContext && audioContext.state !== "closed") {
-				await audioContext.close();
-			}
-			setIsDetectingBeats(false);
-		}
-	};
+    setIsDetectingBeats(true);
+    let audioContext: AudioContext | null = null;
+    try {
+      audioContext = createAudioContext();
+      const audioBuffer = await audioContext.decodeAudioData(
+        await selectedMediaAsset.file.arrayBuffer(),
+      );
+      const element = selectedElement.element;
+      const speed = Math.max(0.01, element.retime?.rate ?? 1);
+      const ticksPerSecond = TICKS_PER_SECOND;
+      const trimStartSeconds = element.trimStart / ticksPerSecond;
+      const trimEndSeconds = Math.min(
+        audioBuffer.duration,
+        trimStartSeconds + (element.duration / ticksPerSecond) * speed,
+      );
+      const detected = await detectAudioBeatsAsync({
+        buffer: audioBuffer,
+        startSeconds: trimStartSeconds,
+        endSeconds: trimEndSeconds,
+      });
+      const markerTimes: MediaTime[] = [];
+      for (const sourceSeconds of detected) {
+        const clipSeconds = (sourceSeconds - trimStartSeconds) / speed;
+        const time = addMediaTime({
+          a: element.startTime,
+          b: mediaTimeFromSeconds({ seconds: clipSeconds }),
+        });
+        if (!editor.scenes.isBookmarked({ time })) {
+          markerTimes.push(time);
+        }
+      }
+      if (markerTimes.length > 0) {
+        editor.command.execute({
+          command: new BatchCommand(
+            markerTimes.map((time) => new ToggleBookmarkCommand(time)),
+          ),
+        });
+      }
+      const added = markerTimes.length;
+      toast.success(
+        added > 0
+          ? t("timeline.beatsMarked").replace("{count}", String(added))
+          : t("timeline.noBeatsFound"),
+      );
+    } catch (error) {
+      console.error("Failed to detect audio beats:", error);
+      toast.error(t("timeline.beatDetectionFailed"));
+    } finally {
+      if (audioContext && audioContext.state !== "closed") {
+        await audioContext.close();
+      }
+      setIsDetectingBeats(false);
+    }
+  };
 
-	const handleAction = ({
-		action,
-		event,
-	}: {
-		action: TActionWithOptionalArgs;
-		event: React.MouseEvent;
-	}) => {
-		event.stopPropagation();
-		invokeAction(action);
-	};
+  const handleDetectSceneCuts = async () => {
+    if (
+      !canDetectSceneCuts ||
+      !selectedElement ||
+      selectedElement.element.type !== "video" ||
+      !selectedMediaAsset
+    )
+      return;
 
-	return (
-		<div className="flex items-center gap-1">
-			<TooltipProvider delayDuration={500}>
-				<ToolbarButton
-					icon={<HugeiconsIcon icon={ScissorIcon} />}
-					tooltip={t("timeline.splitElement")}
-					onClick={({ event }) => handleAction({ action: "split", event })}
-				/>
+    const element = selectedElement.element;
+    const projectId = editor.project.getActiveOrNull()?.metadata.id;
+    const sceneId = editor.scenes.getActiveSceneOrNull()?.id;
+    if (!projectId || !sceneId) return;
 
-				<ToolbarButton
-					icon={<HugeiconsIcon icon={AlignLeftIcon} />}
-					tooltip={t("timeline.splitLeft")}
-					onClick={({ event }) => handleAction({ action: "split-left", event })}
-				/>
+    setIsDetectingSceneCuts(true);
+    try {
+      const suggestions = await detectSceneCuts({
+        file: selectedMediaAsset.file,
+        sourceStartSeconds: element.trimStart / TICKS_PER_SECOND,
+        clipDurationSeconds: element.duration / TICKS_PER_SECOND,
+        playbackRate: Math.max(0.01, element.retime?.rate ?? 1),
+      });
+      if (
+        editor.project.getActiveOrNull()?.metadata.id !== projectId ||
+        editor.scenes.getActiveSceneOrNull()?.id !== sceneId
+      ) {
+        throw new Error("The active project or scene changed during analysis.");
+      }
 
-				<ToolbarButton
-					icon={<HugeiconsIcon icon={AlignRightIcon} />}
-					tooltip={t("timeline.splitRight")}
-					onClick={({ event }) =>
-						handleAction({ action: "split-right", event })
-					}
-				/>
+      const markerTimes = new Set<MediaTime>();
+      for (const suggestion of suggestions) {
+        const time = addMediaTime({
+          a: element.startTime,
+          b: mediaTimeFromSeconds({ seconds: suggestion.clipTimeSeconds }),
+        });
+        if (!markerTimes.has(time) && !editor.scenes.isBookmarked({ time })) {
+          markerTimes.add(time);
+        }
+      }
+      if (markerTimes.size > 0) {
+        editor.command.execute({
+          command: new BatchCommand(
+            [...markerTimes].map((time) => new ToggleBookmarkCommand(time)),
+          ),
+        });
+      }
+      toast.success(
+        markerTimes.size > 0
+          ? t("timeline.sceneCutsMarked").replace(
+              "{count}",
+              String(markerTimes.size),
+            )
+          : t("timeline.noSceneCutsFound"),
+      );
+    } catch (error) {
+      console.error("Failed to detect scene cuts:", error);
+      toast.error(t("timeline.sceneCutDetectionFailed"));
+    } finally {
+      setIsDetectingSceneCuts(false);
+    }
+  };
 
-				<ToolbarButton
-					icon={
-						<HugeiconsIcon
-							icon={isSelectedSourceAudioSeparated ? Unlink02Icon : Link02Icon}
-						/>
-					}
-					tooltip={sourceAudioLabel}
-					disabled={!canToggleSelectedSourceAudio}
-					onClick={({ event }) =>
-						handleAction({ action: "toggle-source-audio", event })
-					}
-				/>
+  const handleAction = ({
+    action,
+    event,
+  }: {
+    action: TActionWithOptionalArgs;
+    event: React.MouseEvent;
+  }) => {
+    event.stopPropagation();
+    invokeAction(action);
+  };
 
-				<ToolbarButton
-					icon={<HugeiconsIcon icon={Copy01Icon} />}
-					tooltip={t("timeline.duplicateElement")}
-					onClick={({ event }) =>
-						handleAction({ action: "duplicate-selected", event })
-					}
-				/>
+  return (
+    <div className="flex items-center gap-1">
+      <TooltipProvider delayDuration={500}>
+        <ToolbarButton
+          icon={<HugeiconsIcon icon={ScissorIcon} />}
+          tooltip={t("timeline.splitElement")}
+          onClick={({ event }) => handleAction({ action: "split", event })}
+        />
 
-				<ToolbarButton
-					icon={<HugeiconsIcon icon={MusicNote01Icon} />}
-					tooltip={t("timeline.detectBeats")}
-					disabled={!canDetectBeats || isDetectingBeats}
-					onClick={({ event }) => {
-						event.stopPropagation();
-						void handleDetectBeats();
-					}}
-				/>
+        <ToolbarButton
+          icon={<HugeiconsIcon icon={AlignLeftIcon} />}
+          tooltip={t("timeline.splitLeft")}
+          onClick={({ event }) => handleAction({ action: "split-left", event })}
+        />
 
-				<ToolbarButton
-					icon={<HugeiconsIcon icon={SnowIcon} />}
-					tooltip={t("timeline.freezeFrameComingSoon")}
-					disabled={true}
-					onClick={({ event: _event }) => {}}
-				/>
+        <ToolbarButton
+          icon={<HugeiconsIcon icon={AlignRightIcon} />}
+          tooltip={t("timeline.splitRight")}
+          onClick={({ event }) =>
+            handleAction({ action: "split-right", event })
+          }
+        />
 
-				<ToolbarButton
-					icon={<HugeiconsIcon icon={Delete02Icon} />}
-					tooltip={t("timeline.deleteElement")}
-					onClick={({ event }) =>
-						handleAction({ action: "delete-selected", event })
-					}
-				/>
+        <ToolbarButton
+          icon={
+            <HugeiconsIcon
+              icon={isSelectedSourceAudioSeparated ? Unlink02Icon : Link02Icon}
+            />
+          }
+          tooltip={sourceAudioLabel}
+          disabled={!canToggleSelectedSourceAudio}
+          onClick={({ event }) =>
+            handleAction({ action: "toggle-source-audio", event })
+          }
+        />
 
-				<div className="bg-border mx-1 h-6 w-px" />
+        <ToolbarButton
+          icon={<HugeiconsIcon icon={Copy01Icon} />}
+          tooltip={t("timeline.duplicateElement")}
+          onClick={({ event }) =>
+            handleAction({ action: "duplicate-selected", event })
+          }
+        />
 
-				<Tooltip>
-					<ToolbarButton
-						icon={<HugeiconsIcon icon={Bookmark02Icon} />}
-						isActive={isCurrentlyBookmarked}
-						tooltip={
-							isCurrentlyBookmarked
-								? t("timeline.removeBookmark")
-								: t("timeline.addBookmark")
-						}
-						onClick={({ event }) =>
-							handleAction({ action: "toggle-bookmark", event })
-						}
-					/>
-				</Tooltip>
+        <ToolbarButton
+          icon={<HugeiconsIcon icon={MusicNote01Icon} />}
+          tooltip={t("timeline.detectBeats")}
+          disabled={!canDetectBeats || isDetectingBeats}
+          onClick={({ event }) => {
+            event.stopPropagation();
+            void handleDetectBeats();
+          }}
+        />
 
-				<GraphEditorPopover
-					open={graphEditor.open}
-					onOpenChange={graphEditor.onOpenChange}
-					value={
-						graphEditor.state.status === "ready"
-							? graphEditor.state.cubicBezier
-							: null
-					}
-					message={graphEditor.state.message}
-					componentOptions={graphEditor.state.componentOptions}
-					activeComponentKey={graphEditor.state.activeComponentKey}
-					onActiveComponentKeyChange={graphEditor.onActiveComponentKeyChange}
-					onPreviewValue={graphEditor.onPreviewValue}
-					onCommitValue={graphEditor.onCommitValue}
-					onCancelPreview={graphEditor.onCancelPreview}
-				>
-					<ToolbarButton
-						icon={<HugeiconsIcon icon={Chart03Icon} />}
-						tooltip={graphEditor.tooltip}
-						disabled={!graphEditor.canOpen}
-						buttonWrapper={(button) =>
-							graphEditor.canOpen ? (
-								<PopoverTrigger asChild>{button}</PopoverTrigger>
-							) : (
-								button
-							)
-						}
-					/>
-				</GraphEditorPopover>
-			</TooltipProvider>
-		</div>
-	);
+        <ToolbarButton
+          icon={
+            isDetectingSceneCuts ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <Clapperboard className="size-4" />
+            )
+          }
+          tooltip={
+            isDetectingSceneCuts
+              ? t("timeline.detectingSceneCuts")
+              : t("timeline.detectSceneCuts")
+          }
+          disabled={!canDetectSceneCuts || isDetectingSceneCuts}
+          onClick={({ event }) => {
+            event.stopPropagation();
+            void handleDetectSceneCuts();
+          }}
+        />
+
+        <ToolbarButton
+          icon={<HugeiconsIcon icon={SnowIcon} />}
+          tooltip={t("timeline.freezeFrameComingSoon")}
+          disabled={true}
+          onClick={({ event: _event }) => {}}
+        />
+
+        <ToolbarButton
+          icon={<HugeiconsIcon icon={Delete02Icon} />}
+          tooltip={t("timeline.deleteElement")}
+          onClick={({ event }) =>
+            handleAction({ action: "delete-selected", event })
+          }
+        />
+
+        <div className="bg-border mx-1 h-6 w-px" />
+
+        <Tooltip>
+          <ToolbarButton
+            icon={<HugeiconsIcon icon={Bookmark02Icon} />}
+            isActive={isCurrentlyBookmarked}
+            tooltip={
+              isCurrentlyBookmarked
+                ? t("timeline.removeBookmark")
+                : t("timeline.addBookmark")
+            }
+            onClick={({ event }) =>
+              handleAction({ action: "toggle-bookmark", event })
+            }
+          />
+        </Tooltip>
+
+        <GraphEditorPopover
+          open={graphEditor.open}
+          onOpenChange={graphEditor.onOpenChange}
+          value={
+            graphEditor.state.status === "ready"
+              ? graphEditor.state.cubicBezier
+              : null
+          }
+          message={graphEditor.state.message}
+          componentOptions={graphEditor.state.componentOptions}
+          activeComponentKey={graphEditor.state.activeComponentKey}
+          onActiveComponentKeyChange={graphEditor.onActiveComponentKeyChange}
+          onPreviewValue={graphEditor.onPreviewValue}
+          onCommitValue={graphEditor.onCommitValue}
+          onCancelPreview={graphEditor.onCancelPreview}
+        >
+          <ToolbarButton
+            icon={<HugeiconsIcon icon={Chart03Icon} />}
+            tooltip={graphEditor.tooltip}
+            disabled={!graphEditor.canOpen}
+            buttonWrapper={(button) =>
+              graphEditor.canOpen ? (
+                <PopoverTrigger asChild>{button}</PopoverTrigger>
+              ) : (
+                button
+              )
+            }
+          />
+        </GraphEditorPopover>
+      </TooltipProvider>
+    </div>
+  );
 }
 
 function SceneSelector() {
-	const { t } = useTranslation();
-	const editor = useEditor();
-	const currentScene = editor.scenes.getActiveScene();
-	const sceneName =
-		currentScene?.name === "Main scene"
-			? t("timeline.mainScene")
-			: (currentScene?.name ?? t("timeline.noScene"));
+  const { t } = useTranslation();
+  const editor = useEditor();
+  const currentScene = editor.scenes.getActiveScene();
+  const sceneName =
+    currentScene?.name === "Main scene"
+      ? t("timeline.mainScene")
+      : (currentScene?.name ?? t("timeline.noScene"));
 
-	return (
-		<div>
-			<SplitButton className="border-foreground/10 border">
-				<SplitButtonLeft>{sceneName}</SplitButtonLeft>
-				<SplitButtonSeparator />
-				<ScenesView>
-					<SplitButtonRight onClick={() => {}}>
-						<HugeiconsIcon icon={Layers01Icon} className="size-4" />
-					</SplitButtonRight>
-				</ScenesView>
-			</SplitButton>
-		</div>
-	);
+  return (
+    <div>
+      <SplitButton className="border-foreground/10 border">
+        <SplitButtonLeft>{sceneName}</SplitButtonLeft>
+        <SplitButtonSeparator />
+        <ScenesView>
+          <SplitButtonRight onClick={() => {}}>
+            <HugeiconsIcon icon={Layers01Icon} className="size-4" />
+          </SplitButtonRight>
+        </ScenesView>
+      </SplitButton>
+    </div>
+  );
 }
 
 function ToolbarRightSection({
-	zoomLevel,
-	minZoom,
-	onZoomChange,
-	onZoom,
+  zoomLevel,
+  minZoom,
+  onZoomChange,
+  onZoom,
 }: {
-	zoomLevel: number;
-	minZoom: number;
-	onZoomChange: (zoom: number) => void;
-	onZoom: (options: { direction: "in" | "out" }) => void;
+  zoomLevel: number;
+  minZoom: number;
+  onZoomChange: (zoom: number) => void;
+  onZoom: (options: { direction: "in" | "out" }) => void;
 }) {
-	const { t } = useTranslation();
-	const snappingEnabled = useTimelineStore((s) => s.snappingEnabled);
-	const rippleEditingEnabled = useTimelineStore((s) => s.rippleEditingEnabled);
-	const toggleSnapping = useTimelineStore((s) => s.toggleSnapping);
-	const toggleRippleEditing = useTimelineStore((s) => s.toggleRippleEditing);
+  const { t } = useTranslation();
+  const snappingEnabled = useTimelineStore((s) => s.snappingEnabled);
+  const rippleEditingEnabled = useTimelineStore((s) => s.rippleEditingEnabled);
+  const toggleSnapping = useTimelineStore((s) => s.toggleSnapping);
+  const toggleRippleEditing = useTimelineStore((s) => s.toggleRippleEditing);
 
-	return (
-		<div className="flex items-center gap-1">
-			<TooltipProvider delayDuration={500}>
-				<ToolbarButton
-					icon={<HugeiconsIcon icon={MagnetIcon} />}
-					isActive={snappingEnabled}
-					tooltip={t("timeline.autoSnapping")}
-					onClick={() => toggleSnapping()}
-				/>
+  return (
+    <div className="flex items-center gap-1">
+      <TooltipProvider delayDuration={500}>
+        <ToolbarButton
+          icon={<HugeiconsIcon icon={MagnetIcon} />}
+          isActive={snappingEnabled}
+          tooltip={t("timeline.autoSnapping")}
+          onClick={() => toggleSnapping()}
+        />
 
-				<ToolbarButton
-					icon={<OcRippleIcon size={24} className="scale-110" />}
-					isActive={rippleEditingEnabled}
-					tooltip={t("timeline.rippleEditing")}
-					onClick={() => toggleRippleEditing()}
-				/>
-			</TooltipProvider>
+        <ToolbarButton
+          icon={<OcRippleIcon size={24} className="scale-110" />}
+          isActive={rippleEditingEnabled}
+          tooltip={t("timeline.rippleEditing")}
+          onClick={() => toggleRippleEditing()}
+        />
+      </TooltipProvider>
 
-			<span
-				className="hidden sm:inline-flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-400 border border-sky-500/20"
-				title="Canvas timeline"
-			>
-				Canvas
-			</span>
+      <span
+        className="hidden sm:inline-flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-400 border border-sky-500/20"
+        title="Canvas timeline"
+      >
+        Canvas
+      </span>
 
-			<div className="bg-border mx-1 h-6 w-px" />
+      <div className="bg-border mx-1 h-6 w-px" />
 
-			<div className="flex items-center gap-1">
-				<Button
-					variant="text"
-					size="icon"
-					onClick={() => onZoom({ direction: "out" })}
-				>
-					<HugeiconsIcon icon={SearchMinusIcon} />
-				</Button>
-				<Slider
-					className="w-28"
-					value={[zoomToSlider({ zoomLevel, minZoom })]}
-					onValueChange={(values) =>
-						onZoomChange(sliderToZoom({ sliderPosition: values[0], minZoom }))
-					}
-					min={0}
-					max={1}
-					step={0.005}
-				/>
-				<Button
-					variant="text"
-					size="icon"
-					onClick={() => onZoom({ direction: "in" })}
-				>
-					<HugeiconsIcon icon={SearchAddIcon} />
-				</Button>
-			</div>
-		</div>
-	);
+      <div className="flex items-center gap-1">
+        <Button
+          variant="text"
+          size="icon"
+          onClick={() => onZoom({ direction: "out" })}
+        >
+          <HugeiconsIcon icon={SearchMinusIcon} />
+        </Button>
+        <Slider
+          className="w-28"
+          value={[zoomToSlider({ zoomLevel, minZoom })]}
+          onValueChange={(values) =>
+            onZoomChange(sliderToZoom({ sliderPosition: values[0], minZoom }))
+          }
+          min={0}
+          max={1}
+          step={0.005}
+        />
+        <Button
+          variant="text"
+          size="icon"
+          onClick={() => onZoom({ direction: "in" })}
+        >
+          <HugeiconsIcon icon={SearchAddIcon} />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function ToolbarButton({
-	icon,
-	tooltip,
-	onClick,
-	disabled,
-	isActive,
-	buttonWrapper,
+  icon,
+  tooltip,
+  onClick,
+  disabled,
+  isActive,
+  buttonWrapper,
 }: {
-	icon: React.ReactNode;
-	tooltip: string;
-	onClick?: ({ event }: { event: React.MouseEvent }) => void;
-	disabled?: boolean;
-	isActive?: boolean;
-	buttonWrapper?: (button: React.ReactElement) => React.ReactElement;
+  icon: React.ReactNode;
+  tooltip: string;
+  onClick?: ({ event }: { event: React.MouseEvent }) => void;
+  disabled?: boolean;
+  isActive?: boolean;
+  buttonWrapper?: (button: React.ReactElement) => React.ReactElement;
 }) {
-	const button = (
-		<Button
-			variant={isActive ? "secondary" : "text"}
-			size="icon"
-			disabled={disabled}
-			onClick={onClick ? (event) => onClick({ event }) : undefined}
-			className={cn(
-				"rounded-sm",
-				disabled ? "cursor-not-allowed opacity-50" : "",
-			)}
-		>
-			{icon}
-		</Button>
-	);
-	const trigger = disabled ? (
-		<span className="inline-flex">{button}</span>
-	) : buttonWrapper ? (
-		buttonWrapper(button)
-	) : (
-		button
-	);
+  const button = (
+    <Button
+      variant={isActive ? "secondary" : "text"}
+      size="icon"
+      disabled={disabled}
+      onClick={onClick ? (event) => onClick({ event }) : undefined}
+      className={cn(
+        "rounded-sm",
+        disabled ? "cursor-not-allowed opacity-50" : "",
+      )}
+    >
+      {icon}
+    </Button>
+  );
+  const trigger = disabled ? (
+    <span className="inline-flex">{button}</span>
+  ) : buttonWrapper ? (
+    buttonWrapper(button)
+  ) : (
+    button
+  );
 
-	return (
-		<Tooltip delayDuration={200}>
-			<TooltipTrigger asChild>{trigger}</TooltipTrigger>
-			<TooltipContent>{tooltip}</TooltipContent>
-		</Tooltip>
-	);
+  return (
+    <Tooltip delayDuration={200}>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
 }

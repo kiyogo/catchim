@@ -23,6 +23,7 @@ import {
 
 export class PasteCommand extends Command {
 	private savedState: SceneTracks | null = null;
+	private appliedState: SceneTracks | null = null;
 	private pastedElements: { trackId: string; elementId: string }[] = [];
 	private readonly time: MediaTime;
 	private readonly clipboardItems: ElementClipboardItem[];
@@ -144,6 +145,7 @@ export class PasteCommand extends Command {
 			}
 		}
 
+		this.appliedState = updatedTracks;
 		editor.timeline.updateTracks(updatedTracks);
 
 		if (this.pastedElements.length > 0) {
@@ -157,6 +159,18 @@ export class PasteCommand extends Command {
 			const editor = EditorCore.getInstance();
 			editor.timeline.updateTracks(this.savedState);
 		}
+	}
+
+	redo(): CommandResult | undefined {
+		if (!this.appliedState) {
+			return this.execute();
+		}
+		// Pasting again would allocate new clip, track, and keyframe IDs and
+		// break the references captured by later commands in the redo stack.
+		EditorCore.getInstance().timeline.updateTracks(this.appliedState);
+		return this.pastedElements.length > 0
+			? createElementSelectionResult(this.pastedElements)
+			: undefined;
 	}
 
 	getPastedElements(): { trackId: string; elementId: string }[] {

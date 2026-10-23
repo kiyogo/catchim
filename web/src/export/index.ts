@@ -1,5 +1,6 @@
 import type { FrameRate } from "opencut-wasm";
 import type { TCanvasSize } from "@/project/types";
+import type { MediaTime } from "@/wasm";
 import { EXPORT_MIME_TYPES } from "./mime-types";
 
 export const EXPORT_QUALITY_VALUES = [
@@ -42,6 +43,8 @@ export interface ExportOptions {
 	resolution?: ExportResolution;
 	fps?: FrameRate;
 	includeAudio?: boolean;
+	range?: { start: MediaTime; end: MediaTime };
+	audioOnly?: boolean;
 }
 
 export interface ExportResult {

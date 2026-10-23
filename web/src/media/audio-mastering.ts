@@ -1,4 +1,5 @@
 import { getNativeTimelineBindings } from "../native/opencut-core";
+import { AUDIO_WORK_CHUNK_SAMPLES, runAudioTask, throwIfAudioAborted, yieldAudioWork } from "./audio-cancellation";
 
 const MASTER_LIMITER_THRESHOLD_DB = -1;
 const MASTER_LIMITER_KNEE_DB = 0;
@@ -79,10 +80,14 @@ export function createAudioMasteringChain({
 
 export async function applyAudioMasteringToBuffer({
 	audioBuffer,
+	signal,
 }: {
 	audioBuffer: AudioBuffer;
+	signal?: AbortSignal;
 }): Promise<AudioBuffer> {
-	if (getAudioBufferPeak({ audioBuffer }) <= MASTER_OUTPUT_HEADROOM) {
+	throwIfAudioAborted(signal);
+	const peak = signal ? await getAudioBufferPeakCancellable(audioBuffer, signal) : getAudioBufferPeak({ audioBuffer });
+	if (peak <= MASTER_OUTPUT_HEADROOM) {
 		return audioBuffer;
 	}
 
@@ -101,22 +106,70 @@ export async function applyAudioMasteringToBuffer({
 	source.connect(input);
 	source.start(0);
 
-	const renderedBuffer = await offlineContext.startRendering();
-	clampAudioBufferPeak({
-		audioBuffer: renderedBuffer,
-		maxPeak: MASTER_OUTPUT_HEADROOM,
-	});
-	return renderedBuffer;
+	try {
+		const renderedBuffer = await runAudioTask(() => offlineContext.startRendering(), signal, () => source.stop());
+		await clampAudioBufferPeak({ audioBuffer: renderedBuffer, maxPeak: MASTER_OUTPUT_HEADROOM, signal });
+		return renderedBuffer;
+	} finally {
+		source.disconnect();
+		input.disconnect();
+	}
 }
 
-function clampAudioBufferPeak({
+async function getAudioBufferPeakCancellable(audioBuffer: AudioBuffer, signal: AbortSignal): Promise<number> {
+	let peak = 0;
+	for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+		peak = Math.max(peak, await getAudioChannelPeakCancellable(audioBuffer.getChannelData(channel), signal));
+	}
+	return peak;
+}
+
+async function getAudioChannelPeakCancellable(data: Float32Array, signal: AbortSignal): Promise<number> {
+	const bindings = getNativeTimelineBindings();
+	let peak = 0;
+		for (let offset = 0; offset < data.length; offset += AUDIO_WORK_CHUNK_SAMPLES) {
+			throwIfAudioAborted(signal);
+			const chunk = data.subarray(offset, offset + AUDIO_WORK_CHUNK_SAMPLES);
+			const ptr = bindings?.malloc(chunk.byteLength) ?? 0;
+			if (bindings && ptr) {
+				try {
+					bindings.HEAPF32.set(chunk, ptr >> 2);
+					peak = Math.max(peak, bindings.computeBufferPeak(ptr, chunk.length));
+				} finally { bindings.free(ptr); }
+			} else {
+				for (const sample of chunk) peak = Math.max(peak, Math.abs(sample));
+			}
+			await yieldAudioWork(signal);
+		}
+	return peak;
+}
+
+async function clampAudioBufferPeak({
 	audioBuffer,
 	maxPeak,
+	signal,
 }: {
 	audioBuffer: AudioBuffer;
 	maxPeak: number;
-}): void {
+	signal?: AbortSignal;
+}): Promise<void> {
+	throwIfAudioAborted(signal);
 	const bindings = getNativeTimelineBindings();
+	if (signal) {
+		for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+			const data = audioBuffer.getChannelData(channel);
+			const peak = bindings ? await getAudioChannelPeakCancellable(data, signal) : 0;
+			const factor = peak > maxPeak ? maxPeak / peak : 1;
+			for (let offset = 0; offset < data.length; offset += AUDIO_WORK_CHUNK_SAMPLES) {
+				throwIfAudioAborted(signal);
+				for (let index = offset; index < Math.min(offset + AUDIO_WORK_CHUNK_SAMPLES, data.length); index++) {
+					data[index] = bindings ? data[index] * factor : Math.max(-maxPeak, Math.min(maxPeak, data[index]));
+				}
+				await yieldAudioWork(signal);
+			}
+		}
+		return;
+	}
 	if (bindings) {
 		for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
 			const channelData = audioBuffer.getChannelData(channel);

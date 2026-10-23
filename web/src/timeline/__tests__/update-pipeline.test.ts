@@ -51,6 +51,21 @@ function buildTracks(element: VideoElement): SceneTracks {
 }
 
 describe("applyElementUpdate", () => {
+	test("preserves intentional gaps before clips on the main track", () => {
+		const element = buildVideoElement({
+			startTime: mediaTime({ ticks: 10 }),
+		});
+		const tracks = buildTracks(element);
+
+		const updatedElement = applyElementUpdate({
+			element,
+			patch: { startTime: mediaTime({ ticks: 25 }) },
+			context: { tracks, trackId: tracks.main.id },
+		});
+
+		expect(updatedElement.startTime).toBe(mediaTime({ ticks: 25 }));
+	});
+
 	test("rounds retimed durations back to integer media time", () => {
 		const element = buildVideoElement();
 		const tracks = buildTracks(element);

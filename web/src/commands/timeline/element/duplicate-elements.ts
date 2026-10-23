@@ -9,6 +9,8 @@ import { EditorCore } from "@/core";
 import { applyPlacement, resolveTrackPlacement } from "@/timeline/placement";
 import { cloneAnimations } from "@/animation";
 import type { MediaTime } from "@/wasm";
+import { findTrackInSceneTracks } from "@/timeline/track-element-update";
+import { isTrackLocked } from "@/timeline/track-capabilities";
 
 interface DuplicateElementsParams {
 	elements: { trackId: string; elementId: string }[];
@@ -17,6 +19,7 @@ interface DuplicateElementsParams {
 export class DuplicateElementsCommand extends Command {
 	private duplicatedElements: { trackId: string; elementId: string }[] = [];
 	private savedState: SceneTracks | null = null;
+	private appliedState: SceneTracks | null = null;
 	private elements: DuplicateElementsParams["elements"];
 
 	constructor({ elements }: DuplicateElementsParams) {
@@ -28,6 +31,14 @@ export class DuplicateElementsCommand extends Command {
 		const editor = EditorCore.getInstance();
 		this.savedState = editor.scenes.getActiveScene().tracks;
 		this.duplicatedElements = [];
+		if (
+			this.elements.some(({ trackId }) => {
+				const track = findTrackInSceneTracks({ tracks: this.savedState!, trackId });
+				return !track || isTrackLocked(track);
+			})
+		) {
+			return;
+		}
 
 		let updatedTracks = this.savedState;
 
@@ -93,6 +104,7 @@ export class DuplicateElementsCommand extends Command {
 			}
 		}
 
+		this.appliedState = updatedTracks;
 		editor.timeline.updateTracks(updatedTracks);
 
 		if (this.duplicatedElements.length > 0) {
@@ -106,6 +118,18 @@ export class DuplicateElementsCommand extends Command {
 			const editor = EditorCore.getInstance();
 			editor.timeline.updateTracks(this.savedState);
 		}
+	}
+
+	redo(): CommandResult | undefined {
+		if (!this.appliedState) {
+			return this.execute();
+		}
+		// Restore the original track, clip, and keyframe IDs so subsequent
+		// commands in the redo stack continue to address the duplicated items.
+		EditorCore.getInstance().timeline.updateTracks(this.appliedState);
+		return this.duplicatedElements.length > 0
+			? createElementSelectionResult(this.duplicatedElements)
+			: undefined;
 	}
 
 	getDuplicatedElements(): { trackId: string; elementId: string }[] {

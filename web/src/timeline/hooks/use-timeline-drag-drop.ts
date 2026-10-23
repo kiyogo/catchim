@@ -1,6 +1,8 @@
 import { useEffect, useReducer, useState, type RefObject } from "react";
 import { useEditor } from "@/editor/use-editor";
 import { useCommittedRef } from "@/hooks/use-committed-ref";
+import { toast } from "sonner";
+import { useTranslation } from "@/i18n";
 import {
 	DragDropController,
 	type DragDropConfig,
@@ -20,6 +22,7 @@ export function useTimelineDragDrop({
 	zoomLevel,
 }: UseTimelineDragDropProps) {
 	const editor = useEditor();
+	const { t } = useTranslation();
 
 	const config: DragDropConfig = {
 		zoomLevel,
@@ -37,6 +40,8 @@ export function useTimelineDragDrop({
 		executeCommand: (command) => editor.command.execute({ command }),
 		insertElement: (args) => editor.timeline.insertElement(args),
 		addClipEffect: (args) => editor.timeline.addClipEffect(args),
+		notifyLockedTrackDrop: () =>
+			toast.error(t("timeline.lockedTrackCannotEdit")),
 	};
 	const configRef = useCommittedRef(config);
 	const [controller] = useState(() => new DragDropController({ configRef }));

@@ -74,6 +74,16 @@ for (const requiredExport of [
   "oc_free",
   "ocw_audio_detect_beats",
   "ocw_audio_sample_peak_buckets",
+  "ocw_audio_plan_buffer_schedule",
+  "ocw_export_frame_count",
+  "ocw_export_frame_sample",
+  "ocw_export_resolve_range",
+  "ocw_audio_encode_pcm16",
+  "ocw_caption_validate_range",
+  "ocw_caption_offset_ranges",
+  "ocw_caption_split_range",
+  "ocw_caption_merge_ranges",
+  "ocw_timeline_compact_gaps",
 ]) {
   if (!exportNames.has(requiredExport)) {
     throw new Error(

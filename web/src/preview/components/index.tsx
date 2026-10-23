@@ -6,7 +6,7 @@ import { useEditor } from "@/editor/use-editor";
 import { useRafLoop } from "@/hooks/use-raf-loop";
 import { useContainerSize } from "@/hooks/use-container-size";
 import { useFullscreen } from "@/hooks/use-fullscreen";
-import { CanvasRenderer } from "@/services/renderer/canvas-renderer";
+import { CanvasRenderer, getCompositorEpoch } from "@/services/renderer/canvas-renderer";
 import { TICKS_PER_SECOND } from "@/wasm";
 import { previewVideoPool } from "@/services/video-cache/preview-video";
 import type { RootNode } from "@/services/renderer/nodes/root-node";
@@ -142,6 +142,7 @@ function PreviewCanvas({
 	const viewportRef = useRef<HTMLDivElement>(null);
 	const lastFrameRef = useRef(-1);
 	const lastSceneRef = useRef<RootNode | null>(null);
+	const lastCompositorEpochRef = useRef(-1);
 	const renderingRef = useRef(false);
 	const { width: nativeWidth, height: nativeHeight } = usePreviewSize();
 	const viewportSize = useContainerSize({ containerRef: viewportRef });
@@ -181,7 +182,7 @@ function PreviewCanvas({
 		const outputCanvas = renderer.getOutputCanvas();
 		outputCanvas.id = "opencut-webgpu-viewport";
 		outputCanvas.className = "opencut-webgpu-compositor";
-		outputCanvas.setAttribute("data-engine", "webgpu");
+		outputCanvas.setAttribute("data-engine", renderer.getBackend());
 		outputCanvas.style.display = "block";
 		outputCanvas.style.width = "100%";
 		outputCanvas.style.height = "100%";
@@ -212,10 +213,12 @@ function PreviewCanvas({
 			(TICKS_PER_SECOND * renderer.fps.denominator) / renderer.fps.numerator,
 		);
 		const frame = Math.floor(renderTime / ticksPerFrame);
+		const compositorEpoch = getCompositorEpoch();
 
 		if (
 			!renderer.playing && frame === lastFrameRef.current &&
-			renderTree === lastSceneRef.current
+			renderTree === lastSceneRef.current &&
+			compositorEpoch === lastCompositorEpochRef.current
 		) {
 			return;
 		}
@@ -223,6 +226,7 @@ function PreviewCanvas({
 		renderingRef.current = true;
 		lastSceneRef.current = renderTree;
 		lastFrameRef.current = frame;
+		lastCompositorEpochRef.current = compositorEpoch;
 		renderer
 			.render({ node: renderTree, time: renderTime })
 			.then(() => {

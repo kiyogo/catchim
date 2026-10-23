@@ -86,6 +86,7 @@ function pasteKeyframesIntoElement({
 
 export class PasteKeyframesCommand extends Command {
 	private savedState: SceneTracks | null = null;
+	private appliedState: SceneTracks | null = null;
 	private readonly trackId: string;
 	private readonly elementId: string;
 	private readonly time: MediaTime;
@@ -129,6 +130,7 @@ export class PasteKeyframesCommand extends Command {
 				}),
 		});
 
+		this.appliedState = updatedTracks;
 		editor.timeline.updateTracks(updatedTracks);
 		return undefined;
 	}
@@ -140,5 +142,14 @@ export class PasteKeyframesCommand extends Command {
 
 		const editor = EditorCore.getInstance();
 		editor.timeline.updateTracks(this.savedState);
+	}
+
+	redo(): CommandResult | undefined {
+		if (!this.appliedState) {
+			return this.execute();
+		}
+		// Later keyframe edits refer to the IDs allocated by the first paste.
+		EditorCore.getInstance().timeline.updateTracks(this.appliedState);
+		return undefined;
 	}
 }

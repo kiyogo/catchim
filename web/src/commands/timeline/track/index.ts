@@ -2,3 +2,8 @@ export { AddTrackCommand } from "./add-track";
 export { RemoveTrackCommand } from "./remove-track";
 export { ToggleTrackMuteCommand } from "./toggle-track-mute";
 export { ToggleTrackVisibilityCommand } from "./toggle-track-visibility";
+export { ToggleTrackLockCommand } from "./toggle-track-lock";
+export { ToggleTrackSoloCommand } from "./toggle-track-solo";
+export { ReorderTrackCommand } from "./reorder-track";
+export { RenameTrackCommand } from "./rename-track";
+export { CloseTrackGapsCommand } from "./close-track-gaps";

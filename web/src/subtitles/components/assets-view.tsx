@@ -40,6 +40,9 @@ import {
 } from "@/components/ui/tooltip";
 import type { DiagnosticSeverity } from "@/diagnostics/types";
 import { useTranslation } from "@/i18n";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CaptionWorkbench } from "./workbench";
+import { captionMessages } from "../messages";
 
 const DIAGNOSTIC_BUTTON_VARIANT: Record<
 	DiagnosticSeverity,
@@ -246,6 +249,7 @@ export function Captions() {
 	const getLanguageName = (
 		language: (typeof TRANSCRIPTION_LANGUAGES)[number],
 	) => (uiLanguage === "vi" ? language.nameVi : language.name);
+	const messages = captionMessages(uiLanguage);
 
 	return (
 		<PanelView
@@ -288,10 +292,17 @@ export function Captions() {
 			<input
 				ref={fileInputRef}
 				type="file"
-				accept=".srt,.ass"
+				accept=".srt,.ass,.vtt"
 				className="hidden"
 				onChange={(event) => void handleFileChange({ event })}
 			/>
+			<Tabs defaultValue="create" className="flex min-h-0 flex-1 flex-col">
+				<TabsList className="mx-3 mb-3 shrink-0">
+					<TabsTrigger value="create">{messages.createTab}</TabsTrigger>
+					<TabsTrigger value="edit">{messages.editTab}</TabsTrigger>
+				</TabsList>
+				<TabsContent value="edit"><CaptionWorkbench /></TabsContent>
+				<TabsContent value="create" className="flex-1">
 			<Section
 				showTopBorder={false}
 				showBottomBorder={false}
@@ -346,6 +357,8 @@ export function Captions() {
 					)}
 				</SectionContent>
 			</Section>
+				</TabsContent>
+			</Tabs>
 		</PanelView>
 	);
 }

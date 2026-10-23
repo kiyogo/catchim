@@ -69,6 +69,7 @@ export const blurEffectDefinition: EffectDefinition = {
 	type: "blur",
 	name: "Blur",
 	keywords: ["blur", "soft", "defocus"],
+	category: "blur",
 	params: [
 		{
 			key: "intensity",

@@ -2,6 +2,7 @@ import { PitchShifter } from "soundtouchjs";
 import { clampRetimeRate, shouldMaintainPitch } from "@/retime/rate";
 import type { RetimeConfig } from "@/timeline";
 import { getSourceTimeAtClipTime } from "./resolve";
+import { AUDIO_WORK_CHUNK_SAMPLES, runAudioTask, throwIfAudioAborted, yieldAudioWork } from "@/media/audio-cancellation";
 
 const RATE_EPSILON = 1e-6;
 
@@ -24,13 +25,14 @@ function sampleLinear({
 	return channelData[lower] * (1 - fraction) + channelData[upper] * fraction;
 }
 
-function buildResampledBuffer({
+async function buildResampledBuffer({
 	audioContext,
 	sourceBuffer,
 	trimStart,
 	clipDuration,
 	targetSampleRate,
 	retime,
+	signal,
 }: {
 	audioContext: BaseAudioContext;
 	sourceBuffer: AudioBuffer;
@@ -38,7 +40,9 @@ function buildResampledBuffer({
 	clipDuration: number;
 	targetSampleRate: number;
 	retime?: RetimeConfig;
-}): AudioBuffer {
+	signal?: AbortSignal;
+}): Promise<AudioBuffer> {
+	throwIfAudioAborted(signal);
 	const outputLength = Math.max(1, Math.ceil(clipDuration * targetSampleRate));
 	const numChannels = Math.max(1, Math.min(2, sourceBuffer.numberOfChannels));
 	const outputBuffer = audioContext.createBuffer(
@@ -54,6 +58,7 @@ function buildResampledBuffer({
 		const outputData = outputBuffer.getChannelData(channel);
 
 		for (let i = 0; i < outputLength; i++) {
+			if (signal && i % AUDIO_WORK_CHUNK_SAMPLES === 0) await yieldAudioWork(signal);
 			const clipTime = i / targetSampleRate;
 			const sourceTime =
 				trimStart + getSourceTimeAtClipTime({ clipTime, retime });
@@ -73,13 +78,16 @@ async function buildPitchPreservedBuffer({
 	clipDuration,
 	rate,
 	targetSampleRate,
+	signal,
 }: {
 	sourceBuffer: AudioBuffer;
 	trimStart: number;
 	clipDuration: number;
 	rate: number;
 	targetSampleRate: number;
+	signal?: AbortSignal;
 }): Promise<AudioBuffer> {
+	throwIfAudioAborted(signal);
 	const nativeSampleRate = sourceBuffer.sampleRate;
 	const sourceDuration = clipDuration * rate;
 	const startSample = Math.max(0, Math.floor(trimStart * nativeSampleRate));
@@ -109,6 +117,7 @@ async function buildPitchPreservedBuffer({
 	);
 
 	for (let ch = 0; ch < numChannels; ch++) {
+		throwIfAudioAborted(signal);
 		const src = sourceBuffer.getChannelData(
 			Math.min(ch, sourceBuffer.numberOfChannels - 1),
 		);
@@ -122,7 +131,13 @@ async function buildPitchPreservedBuffer({
 	resampleSourceNode.buffer = nativeBuffer;
 	resampleSourceNode.connect(resampleCtx.destination);
 	resampleSourceNode.start(0);
-	const resampledBuffer = await resampleCtx.startRendering();
+	let resampledBuffer: AudioBuffer;
+	try {
+		resampledBuffer = await runAudioTask(() => resampleCtx.startRendering(), signal, () => resampleSourceNode.stop());
+	} finally {
+		resampleSourceNode.disconnect();
+	}
+	throwIfAudioAborted(signal);
 
 	const outputSamples = Math.max(
 		1,
@@ -137,7 +152,11 @@ async function buildPitchPreservedBuffer({
 	shifter.tempo = rate;
 	shifter.pitch = 1;
 	shifter.connect(stretchCtx.destination);
-	return stretchCtx.startRendering();
+	try {
+		return await runAudioTask(() => stretchCtx.startRendering(), signal, () => shifter.disconnect());
+	} finally {
+		shifter.disconnect();
+	}
 }
 
 export async function renderRetimedBuffer({
@@ -147,6 +166,7 @@ export async function renderRetimedBuffer({
 	clipDuration,
 	retime,
 	maintainPitch = false,
+	signal,
 }: {
 	audioContext: BaseAudioContext;
 	sourceBuffer: AudioBuffer;
@@ -154,7 +174,9 @@ export async function renderRetimedBuffer({
 	clipDuration: number;
 	retime?: RetimeConfig;
 	maintainPitch?: boolean;
+	signal?: AbortSignal;
 }): Promise<AudioBuffer> {
+	throwIfAudioAborted(signal);
 	const targetSampleRate = audioContext.sampleRate;
 	const rate = clampRetimeRate({ rate: retime?.rate ?? 1 });
 	const usePitchPreservation =
@@ -168,6 +190,7 @@ export async function renderRetimedBuffer({
 			clipDuration,
 			rate,
 			targetSampleRate,
+			signal,
 		});
 	}
 
@@ -178,5 +201,6 @@ export async function renderRetimedBuffer({
 		clipDuration,
 		targetSampleRate,
 		retime,
+		signal,
 	});
 }

@@ -1,5 +1,6 @@
 import type { ParseSubtitleResult, SubtitleCue } from "./types";
 import { getNativeTimelineBindings } from "@/native/opencut-core";
+import { decodeSubtitleText } from "./text";
 
 const TIMESTAMP_SEPARATOR = /\s*-->\s*/;
 const TIMESTAMP_PATTERN =
@@ -38,7 +39,7 @@ export function parseSrt({ input }: { input: string }): ParseSubtitleResult {
 		}
 
 		const textLines = lines.slice(timestampIndex + 1);
-		const text = textLines.join("\n").trim();
+		const text = decodeSubtitleText(textLines.join("\n")).trim();
 		if (!text) {
 			skippedCueCount += 1;
 			continue;
@@ -78,14 +79,6 @@ export function parseSrt({ input }: { input: string }): ParseSubtitleResult {
 }
 
 function parseSrtTimestamp({ input }: { input: string }): number {
-	const bindings = getNativeTimelineBindings();
-	if (bindings) {
-		const ticks = bindings.parseSubtitleTimestamp(input);
-		if (ticks >= 0) {
-			return bindings.toSeconds(ticks);
-		}
-	}
-
 	const normalized = input.trim().replace(",", ".");
 	const match = normalized.match(/^(\d{2}):(\d{2}):(\d{2})\.(\d{1,3})$/);
 	if (!match) {
@@ -97,6 +90,12 @@ function parseSrtTimestamp({ input }: { input: string }): number {
 	const parsedMinutes = Number.parseInt(minutes, 10);
 	const parsedSeconds = Number.parseInt(seconds, 10);
 	const parsedMilliseconds = Number.parseInt(milliseconds.padEnd(3, "0"), 10);
+	if (parsedMinutes >= 60 || parsedSeconds >= 60) return Number.NaN;
+	const bindings = getNativeTimelineBindings();
+	if (bindings) {
+		const ticks = bindings.parseSubtitleTimestamp(input);
+		if (Number.isFinite(ticks) && ticks >= 0) return bindings.toSeconds(ticks);
+	}
 
 	return (
 		parsedHours * 3600 +

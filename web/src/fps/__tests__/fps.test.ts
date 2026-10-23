@@ -33,6 +33,21 @@ describe("getHighestImportedVideoFps", () => {
 });
 
 describe("getRaisedProjectFpsForImportedMedia", () => {
+	test("preserves NTSC rates when a higher-fps video is imported", () => {
+		expect(
+			getRaisedProjectFpsForImportedMedia({
+				currentFps: { numerator: 24, denominator: 1 },
+				importedAssets: [{ type: "video", fps: 29.97 }],
+			}),
+		).toEqual({ numerator: 30_000, denominator: 1_001 });
+		expect(
+			getRaisedProjectFpsForImportedMedia({
+				currentFps: { numerator: 30, denominator: 1 },
+				importedAssets: [{ type: "video", fps: 59.94 }],
+			}),
+		).toEqual({ numerator: 60_000, denominator: 1_001 });
+	});
+
 	test("raises the project fps to match a higher-fps import", () => {
 		expect(
 			getRaisedProjectFpsForImportedMedia({

@@ -127,6 +127,58 @@ pub fn snapped_seek_time(time: i64, duration: i64, rate: FrameRate) -> Option<i6
     Some(snapped.clamp(0, duration))
 }
 
+pub fn parse_subtitle_timestamp(input: &str) -> Option<i64> {
+    let clean = input.trim().replace(',', ".");
+    let parts: Vec<&str> = clean.split(':').collect();
+    if parts.len() != 3 || parts[0].is_empty() || !parts[0].bytes().all(|b| b.is_ascii_digit()) ||
+        parts[1].len() != 2 || !parts[1].bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let (seconds, fraction) = parts[2].split_once('.')?;
+    if seconds.len() != 2 || !seconds.bytes().all(|b| b.is_ascii_digit()) ||
+        fraction.is_empty() || fraction.len() > 3 || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let hours: i64 = parts[0].parse().ok()?;
+    let minutes: i64 = parts[1].parse().ok()?;
+    let seconds: i64 = seconds.parse().ok()?;
+    if minutes >= 60 || seconds >= 60 { return None; }
+    let milliseconds: i64 = fraction.parse::<i64>().ok()? * 10_i64.pow(3 - fraction.len() as u32);
+    let whole_seconds = hours.checked_mul(3600)?.checked_add(minutes * 60)?.checked_add(seconds)?;
+    whole_seconds.checked_mul(TICKS_PER_SECOND)?.checked_add(milliseconds * (TICKS_PER_SECOND / 1000))
+}
+
+pub fn format_subtitle_timestamp(ticks: i64) -> String {
+    // Round total milliseconds before splitting fields so 59.9999 carries to 01:00.000.
+    let total_ms = (i128::from(ticks.max(0)) * 1000 + i128::from(TICKS_PER_SECOND / 2)) / i128::from(TICKS_PER_SECOND);
+    let hours = total_ms / 3_600_000;
+    let minutes = (total_ms / 60_000) % 60;
+    let seconds = (total_ms / 1000) % 60;
+    let milliseconds = total_ms % 1000;
+    format!("{:02}:{:02}:{:02},{:03}", hours, minutes, seconds, milliseconds)
+}
+
+#[cfg(test)]
+mod subtitle_time_tests {
+    use super::*;
+
+    #[test]
+    fn carries_rounded_milliseconds_and_preserves_hours() {
+        assert_eq!(format_subtitle_timestamp(120_000 * 60 - 1), "00:01:00,000");
+        assert_eq!(format_subtitle_timestamp(120_000 * 3600 - 1), "01:00:00,000");
+        assert_eq!(format_subtitle_timestamp(120_000 + 15_000), "00:00:01,125");
+    }
+
+    #[test]
+    fn parses_srt_and_ass_precision_without_accepting_invalid_fields() {
+        assert_eq!(parse_subtitle_timestamp("00:01:02,345"), Some(62 * 120_000 + 345 * 120));
+        assert_eq!(parse_subtitle_timestamp("0:00:00.12"), Some(14_400));
+        for bad in ["oops", "00:60:00,000", "00:00:61.000", "-1:00:00.000", "00:00:00.x", "00:00:00.1234", "0:0:0.0"] {
+            assert_eq!(parse_subtitle_timestamp(bad), None, "{bad}");
+        }
+    }
+}
+
 pub fn format_timecode(time: i64, format: TimecodeFormat, rate: FrameRate) -> String {
     let total_ticks = time.max(0);
     let total_seconds = total_ticks / TICKS_PER_SECOND;

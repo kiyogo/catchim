@@ -13,12 +13,15 @@ import {
 	QUALITY_VERY_HIGH,
 } from "mediabunny";
 import type { FrameRate } from "opencut-wasm";
-import { mediaTimeToSeconds } from "opencut-wasm";
-import { TICKS_PER_SECOND } from "@/wasm";
 import { frameRateToFloat } from "@/fps/utils";
+import { getExportFrameCount, getExportFrameSample } from "./frame-count";
 import type { RootNode } from "./nodes/root-node";
 import type { ExportFormat, ExportQuality } from "@/export";
 import { CanvasRenderer } from "./canvas-renderer";
+import { beginExportRender } from "./canvas-renderer";
+import { initializeGpu } from "opencut-wasm";
+import { webGpuEngine } from "@/native/webgpu-engine";
+import { resolveExportRange, type ExportRange } from "@/export/range";
 
 type ExportParams = {
 	width: number;
@@ -81,15 +84,35 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 
 	async export({
 		rootNode,
+		range,
 	}: {
 		rootNode: RootNode;
+		range?: ExportRange;
 	}): Promise<ArrayBuffer | null> {
+		if (this.isCancelled) {
+			this.emit("cancelled");
+			return null;
+		}
+		const resolvedRange = resolveExportRange({ duration: rootNode.duration, range });
+		const releaseCompositor = await beginExportRender();
+		try {
+			await initializeGpu();
+			this.renderer.getOutputCanvas();
+			if ((globalThis as typeof globalThis & { __CATCHIM_BROWSER__?: boolean }).__CATCHIM_BROWSER__ &&
+				(!webGpuEngine.isHardwareAdapter || this.renderer.getBackend() !== "webgpu")) {
+				throw new Error("Không có GPU phần cứng WebGPU đang hoạt động để xuất video. Kiểm tra chrome://gpu và bật tăng tốc phần cứng.");
+			}
+			return await this.exportFrames({ rootNode, range: resolvedRange });
+		} finally {
+			releaseCompositor();
+		}
+	}
+
+	private async exportFrames({ rootNode, range }: { rootNode: RootNode; range: ExportRange & { duration: number } }): Promise<ArrayBuffer | null> {
 		const fps = this.renderer.fps;
 		const fpsFloat = frameRateToFloat(fps);
-		const ticksPerFrame = Math.round(
-			(TICKS_PER_SECOND * fps.denominator) / fps.numerator,
-		);
-		const frameCount = Math.floor(rootNode.duration / ticksPerFrame);
+		const frameCount = getExportFrameCount(range.duration, fps);
+		if (frameCount === 0) throw new Error("No frames to export: invalid duration or frame rate");
 
 		const outputFormat =
 			this.format === "webm" ? new WebMOutputFormat() : new Mp4OutputFormat();
@@ -102,6 +125,7 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 		const videoSource = new CanvasSource(this.renderer.getOutputCanvas(), {
 			codec: this.format === "webm" ? "vp9" : "avc",
 			bitrate: qualityMap[this.quality],
+			hardwareAcceleration: "prefer-hardware",
 		});
 
 		output.addVideoTrack(videoSource, { frameRate: fpsFloat });
@@ -127,6 +151,7 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 			output.addAudioTrack(audioSource);
 		}
 
+		try {
 		await output.start();
 
 		if (audioSource && this.audioBuffer) {
@@ -141,10 +166,20 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 				return null;
 			}
 
-			const timeTicks = i * ticksPerFrame;
-			const timeSeconds = mediaTimeToSeconds({ time: timeTicks });
-			await this.renderer.render({ node: rootNode, time: timeTicks });
-			await videoSource.add(timeSeconds, 1 / fpsFloat);
+			const sample = getExportFrameSample(range.duration, fps, i);
+			if (!sample) throw new Error("Invalid export frame sample");
+			await this.renderer.render({ node: rootNode, time: range.start + sample.timeTicks });
+			if ((globalThis as typeof globalThis & { __CATCHIM_BROWSER__?: boolean }).__CATCHIM_BROWSER__ &&
+				this.renderer.getBackend() !== "webgpu") {
+				throw new Error("WebGPU ngừng hoạt động trong lúc xuất video");
+			}
+			await webGpuEngine.device?.queue.onSubmittedWorkDone();
+			if (this.isCancelled) {
+				await output.cancel();
+				this.emit("cancelled");
+				return null;
+			}
+			await videoSource.add(sample.timestampSeconds, sample.durationSeconds);
 
 			this.emit("progress", i / frameCount);
 		}
@@ -157,6 +192,10 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 
 		videoSource.close();
 		await output.finalize();
+		if (this.isCancelled) {
+			this.emit("cancelled");
+			return null;
+		}
 		this.emit("progress", 1);
 
 		const buffer = output.target.buffer;
@@ -167,5 +206,9 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 
 		this.emit("complete", buffer);
 		return buffer;
+		} catch (error) {
+			await output.cancel().catch(() => {});
+			throw error;
+		}
 	}
 }

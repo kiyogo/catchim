@@ -4,6 +4,7 @@ import { TimelineTrackCanvas } from "./timeline-track-canvas";
 import type { TimelineTrack } from "@/timeline";
 import type { TimelineElement as TimelineElementType } from "@/timeline";
 import type { ElementDragView } from "@/timeline";
+import { isTrackLocked } from "@/timeline/track-capabilities";
 
 interface TimelineTrackContentProps {
 	track: TimelineTrack;
@@ -52,8 +53,12 @@ export function TimelineTrackContent({
 				zoomLevel={zoomLevel}
 				dynamicTimelineWidth={dynamicTimelineWidth}
 				dragView={dragView}
-				onResizeStart={onResizeStart}
-				onElementMouseDown={onElementMouseDown}
+				onResizeStart={(params) => {
+					if (!isTrackLocked(track)) onResizeStart(params);
+				}}
+				onElementMouseDown={(params) => {
+					if (!isTrackLocked(track)) onElementMouseDown(params);
+				}}
 				onElementClick={onElementClick}
 				onTrackMouseDown={onTrackMouseDown}
 				onTrackMouseUp={onTrackMouseUp}

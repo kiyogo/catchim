@@ -6,8 +6,7 @@ import { useEditor } from "@/editor/use-editor";
 import { TTS_VOICES } from "@/services/tts/voices";
 import { TtsService } from "@/services/tts/tts-service";
 import type { TtsVoice, VoiceCategory } from "@/services/tts/types";
-import { buildLibraryAudioElement } from "@/timeline/element-utils";
-import { mediaTimeFromSeconds } from "@/wasm";
+import { insertGeneratedSpeech } from "@/services/tts/insert-generated-speech";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -117,6 +116,12 @@ export function TextToSpeechTab({
 			toast.error(t("tts.emptyTextError") || "Nội dung văn bản không được để trống.");
 			return;
 		}
+		const project = editor.project.getActiveOrNull();
+		const scene = editor.scenes.getActiveSceneOrNull();
+		if (!project || !scene) {
+			toast.error("Không có dự án hoặc cảnh đang mở để thêm giọng đọc.");
+			return;
+		}
 
 		TtsService.stopPreview();
 		setPreviewVoiceId(null);
@@ -129,37 +134,31 @@ export function TextToSpeechTab({
 				speed,
 				pitch,
 			});
-
-			// If user modified text in TTS tab, optionally keep element content updated
-			if (cleanText !== String(element.params.content ?? "")) {
-				editor.timeline.updateElements({
-					updates: [
-						{
-							trackId,
-							elementId: element.id,
-							patch: {
-								params: {
-									...element.params,
-									content: cleanText,
-								},
-							},
-						},
-					],
-				});
-			}
-
-			// Create library audio element placed right at text element's start time
-			const audioElement = buildLibraryAudioElement({
-				sourceUrl: result.blobUrl,
+			await insertGeneratedSpeech({
+				editor,
+				projectId: project.metadata.id,
+				sceneId: scene.id,
+				result,
 				name: `[TTS] ${selectedVoice.name} - ${cleanText.slice(0, 16)}`,
-				duration: mediaTimeFromSeconds({ seconds: result.durationSeconds }),
 				startTime: element.startTime,
-				buffer: result.audioBuffer,
-			});
-
-			editor.timeline.insertElement({
-				placement: { mode: "auto", trackType: "audio" },
-				element: audioElement,
+				beforeInsert: () => {
+					if (cleanText !== String(element.params.content ?? "")) {
+						editor.timeline.updateElements({
+							updates: [
+								{
+									trackId,
+									elementId: element.id,
+									patch: {
+										params: {
+											...element.params,
+											content: cleanText,
+										},
+									},
+								},
+							],
+						});
+					}
+				},
 			});
 
 			toast.success(

@@ -31,6 +31,10 @@ export type TrackType = "video" | "text" | "audio" | "graphic" | "effect";
 interface BaseTrack {
 	id: string;
 	name: string;
+	/** Optional for backward compatibility with projects saved before track locking. */
+	locked?: boolean;
+	/** Optional persisted solo state; omitted in older projects. */
+	solo?: boolean;
 }
 
 export interface VideoTrack extends BaseTrack {
@@ -105,6 +109,8 @@ export type AudioElement = UploadAudioElement | LibraryAudioElement;
 interface BaseTimelineElement {
 	id: string;
 	name: string;
+	/** Persistent link group used to move related clips together. */
+	linkGroupId?: string;
 	duration: MediaTime;
 	startTime: MediaTime;
 	trimStart: MediaTime;

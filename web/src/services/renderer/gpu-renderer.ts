@@ -40,10 +40,12 @@ export const gpuRenderer = {
 		height: number;
 		passes: EffectPass[];
 	}): OffscreenCanvas {
-		if (passes.length === 0 || !gpuAvailable) {
+		if (passes.length === 0) {
 			return source;
 		}
 
+		// The WASM effect bridge also provides the software fallback when WebGPU
+		// is unavailable; keep effect thumbnails and previews functional there.
 		return applyEffectPasses({
 			source,
 			width,

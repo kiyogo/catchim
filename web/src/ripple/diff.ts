@@ -13,9 +13,11 @@ interface ElementSpan extends Interval {
 export function computeRippleAdjustments({
 	beforeTracks,
 	afterTracks,
+	includeLeadingEdges = false,
 }: {
 	beforeTracks: SceneTracks;
 	afterTracks: SceneTracks;
+	includeLeadingEdges?: boolean;
 }): RippleAdjustment[] {
 	const beforeTrackList = [
 		...beforeTracks.overlay,
@@ -38,6 +40,7 @@ export function computeRippleAdjustments({
 			beforeElements: beforeTrack.elements,
 			afterElements: afterTracksById.get(beforeTrack.id)?.elements ?? [],
 			allAfterElementIds,
+			includeLeadingEdges,
 		}),
 	);
 }
@@ -47,11 +50,13 @@ function computeTrackRippleAdjustments({
 	beforeElements,
 	afterElements,
 	allAfterElementIds,
+	includeLeadingEdges,
 }: {
 	trackId: string;
 	beforeElements: TimelineElement[];
 	afterElements: TimelineElement[];
 	allAfterElementIds: Set<string>;
+	includeLeadingEdges: boolean;
 }): RippleAdjustment[] {
 	const beforeElementsById = buildElementSpanMap({ elements: beforeElements });
 	const afterElementsById = buildElementSpanMap({ elements: afterElements });
@@ -59,6 +64,7 @@ function computeTrackRippleAdjustments({
 		beforeElementsById,
 		afterElementsById,
 		allAfterElementIds,
+		includeLeadingEdges,
 	});
 	const freedIntervals = subtractIntervalSets({
 		sourceIntervals: vacatedIntervals,
@@ -89,10 +95,12 @@ function collectTrackIntervals({
 	beforeElementsById,
 	afterElementsById,
 	allAfterElementIds,
+	includeLeadingEdges,
 }: {
 	beforeElementsById: Map<string, ElementSpan>;
 	afterElementsById: Map<string, ElementSpan>;
 	allAfterElementIds: Set<string>;
+	includeLeadingEdges: boolean;
 }): {
 	vacatedIntervals: Interval[];
 	joinedIntervals: Interval[];
@@ -119,6 +127,14 @@ function collectTrackIntervals({
 				intervals: vacatedIntervals,
 				startTime: afterElement.endTime,
 				endTime: beforeElement.endTime,
+			});
+		}
+
+		if (includeLeadingEdges && beforeElement.startTime < afterElement.startTime) {
+			pushInterval({
+				intervals: vacatedIntervals,
+				startTime: beforeElement.startTime,
+				endTime: Math.min(beforeElement.endTime, afterElement.startTime),
 			});
 		}
 	}

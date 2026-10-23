@@ -1,4 +1,8 @@
 pub mod time;
+pub mod export;
+pub mod audio_export;
+pub mod caption_edit;
+pub mod gap_edit;
 pub mod animation;
 pub mod timeline;
 pub mod audio;
@@ -15,4 +19,7 @@ pub use animation::{ScalarChannel, ScalarKeyframe, evaluate_bezier_1d, solve_bez
 pub use timeline::{Timeline, Track, Clip, TrackType};
 pub use compositor::{BlendMode, QuadTransform};
 pub use ui::{UiScene, UiNode, UiNodeType, UiDrawCommand, UiStyle, UiInteractionState};
+pub use audio::{
+    plan_audio_buffer_schedule, AudioScheduleError, AudioScheduleRequest, AudioScheduleWindow,
+};
 

@@ -19,6 +19,20 @@ export type CanvasRendererParams = {
 	isPreview?: boolean;
 };
 
+let exportOwnsCompositor = false;
+let compositorEpoch = 0;
+let previewRenders = 0;
+let previewIdle: (() => void) | null = null;
+
+export async function beginExportRender() {
+	if (exportOwnsCompositor) throw new Error("Đã có tác vụ xuất video đang chạy");
+	exportOwnsCompositor = true;
+	if (previewRenders > 0) await new Promise<void>(resolve => { previewIdle = resolve; });
+	return () => { exportOwnsCompositor = false; compositorEpoch++; };
+}
+
+export function getCompositorEpoch() { return compositorEpoch; }
+
 export class CanvasRenderer {
 	canvas: OffscreenCanvas;
 	context: OffscreenCanvasRenderingContext2D;
@@ -50,6 +64,8 @@ export class CanvasRenderer {
 		return wasmCompositor.getCanvas();
 	}
 
+	getBackend() { return wasmCompositor.getBackend(); }
+
 	setSize({ width, height }: { width: number; height: number }) {
 		this.width = width;
 		this.height = height;
@@ -61,6 +77,8 @@ export class CanvasRenderer {
 
 	async render({ node, time }: { node: AnyBaseNode; time: number }) {
 		if (this.disposed) return;
+		if (this.isPreview && exportOwnsCompositor) return;
+		if (this.isPreview) previewRenders++;
 		if (this.isPreview) previewVideoPool.beginFrame();
 		try {
 		await measureSpanAsync({
@@ -88,6 +106,7 @@ export class CanvasRenderer {
 		if (this.isPreview) recordPreviewSubmission();
 		} finally {
 			if (this.isPreview) previewVideoPool.endFrame();
+			if (this.isPreview && --previewRenders === 0) { previewIdle?.(); previewIdle = null; }
 		}
 	}
 

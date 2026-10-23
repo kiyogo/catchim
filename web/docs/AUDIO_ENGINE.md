@@ -46,8 +46,12 @@ The async toolbar path copies `AudioBuffer` channels into a planar buffer and tr
 
 ---
 
-## 3. Web Audio & AudioWorklet Synchronization
+## 3. Web Audio Scheduling
 
-- In live playback, mixed PCM buffers are dispatched to the browser's `AudioContext` via `AudioWorkletNode`.
-- Audio clock serves as the master time synchronization reference for the video playback scheduler, preventing audio-video drift.
-- During export, the Rust audio mixer renders the full multi-track soundtrack in a single fast-forward pass, feeding raw PCM into WebCodecs `AudioEncoder` at over **100× real-time speed**.
+`AudioManager` schedules decoded Mediabunny buffers with `AudioBufferSourceNode` and gain nodes. Clips requiring pitch preservation or animated volume use the existing prepared-buffer path. Streaming clips use `planAudioBufferSchedule` in `src/media/audio-scheduling.ts`.
+
+The streaming planner intersects the decoded buffer, the half-open clip interval, the requested seek position, and the current audio clock. Rust owns this calculation in `audio::plan_audio_buffer_schedule`; `ocw_audio_plan_buffer_schedule` returns `-1` for invalid input, `0` for no audible interval, or `1` with four `f64` values: context start, source offset, source duration, and timeline start. Times are seconds at this browser scheduling boundary. The typed bridge frees the output allocation after every call. An older or unavailable WASM artifact uses an equivalent TypeScript compatibility path.
+
+`AudioBufferSourceNode.start(when, offset, duration)` receives source-buffer seconds for both offset and duration, independently of playback rate, as specified by the [Web Audio API](https://webaudio.github.io/web-audio-api/#dom-audiobuffersourcenode-start). Therefore a late 0.5-second timeline offset at 2x skips one source second, and playback is limited to the source content that fits before the clip end. Buffers wholly outside the clip are not scheduled and do not allocate audio nodes.
+
+These changes bound streaming preview audio after trim/split. They do not establish a shared master clock for every transport or claim a measured playback/export speedup. Export continues through the existing timeline audio mixer and encoder path.

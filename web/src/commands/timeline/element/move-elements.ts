@@ -14,6 +14,7 @@ import type {
 	PlannedTrackCreation,
 } from "@/timeline/group-move";
 import { findTrackInSceneTracks } from "@/timeline/track-element-update";
+import { isTrackLocked } from "@/timeline/track-capabilities";
 
 export class MoveElementCommand extends Command {
 	private savedState: SceneTracks | null = null;
@@ -36,6 +37,29 @@ export class MoveElementCommand extends Command {
 	execute(): CommandResult | undefined {
 		const editor = EditorCore.getInstance();
 		this.savedState = editor.scenes.getActiveScene().tracks;
+		if (
+			this.moves.some((move) => {
+				const sourceTrack = findTrackInSceneTracks({
+					tracks: this.savedState!,
+					trackId: move.sourceTrackId,
+				});
+				const targetTrack = findTrackInSceneTracks({
+					tracks: this.savedState!,
+					trackId: move.targetTrackId,
+				});
+				const targetWillBeCreated = this.createTracks.some(
+					(track) => track.id === move.targetTrackId,
+				);
+				return (
+					!sourceTrack ||
+					isTrackLocked(sourceTrack) ||
+					(!targetWillBeCreated &&
+						(!targetTrack || isTrackLocked(targetTrack)))
+				);
+			})
+		) {
+			return;
+		}
 
 		let tracksToUpdate = this.savedState;
 		for (const createTrack of [...this.createTracks].sort(

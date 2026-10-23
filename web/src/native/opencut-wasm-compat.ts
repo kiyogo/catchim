@@ -309,9 +309,10 @@ const textures = new Map<string, TextureEntry>();
 
 function ensureCompositorContext(): void {
 	if (!compositorCanvas) return;
-	if (compositorGpuContext && !webGpuEngine.isAvailable) {
+	if ((compositorGpuContext && !webGpuEngine.isAvailable) ||
+		(compositor2dContext && webGpuEngine.isAvailable)) {
 		// A canvas cannot change context type after creation. On device loss,
-		// replace the surface and continue through the real 2D fallback.
+		// or when the GPU becomes ready, replace the surface with the right context.
 		const next = document.createElement("canvas");
 		next.width = compositorCanvas.width; next.height = compositorCanvas.height;
 		next.id = compositorCanvas.id; next.className = compositorCanvas.className;
@@ -348,6 +349,12 @@ function ensureCompositorContext(): void {
 	} catch (e) {
 		// Context creation failure fallback
 	}
+}
+
+export function getCompositorBackend(): "webgpu" | "canvas2d" | "unavailable" {
+	ensureCompositorContext();
+	return compositorGpuContext && webGpuEngine.isAvailable
+		? "webgpu" : compositor2dContext ? "canvas2d" : "unavailable";
 }
 
 export function initCompositor(width: number, height: number): void {
@@ -479,6 +486,11 @@ function blurSigma(groups: any[][] = []) {
 	}
 	return Math.sqrt(Math.max(x, y));
 }
+
+function pixelEffectPasses(groups: any[][] = []): any[] {
+	return groups.flat().filter((pass) => pass.shader !== "gaussian-blur");
+}
+
 function drawFrame2D(frame: any, ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) {
 	const { width, height } = frame;
 	layerSurface = surface(layerSurface, width, height);
@@ -492,9 +504,20 @@ function drawFrame2D(frame: any, ctx: CanvasRenderingContext2D | OffscreenCanvas
 	for (const item of frame.items ?? []) {
 		if (item.type === "sceneEffect") {
 			const sigma = blurSigma(item.effectPassGroups);
-			if (sigma > 0) {
-				filter.clearRect(0, 0, width, height); filter.filter = `blur(${sigma}px)`;
-				filter.drawImage(ctx.canvas, 0, 0); filter.filter = "none";
+			const pixelPasses = pixelEffectPasses(item.effectPassGroups);
+			if (sigma > 0 || pixelPasses.length > 0) {
+				filter.clearRect(0, 0, width, height);
+				filter.filter = sigma > 0 ? `blur(${sigma}px)` : "none";
+				filter.drawImage(ctx.canvas, 0, 0);
+				filter.filter = "none";
+				if (pixelPasses.length > 0) {
+					applyEffectPasses({
+						source: filterSurface,
+						width,
+						height,
+						passes: pixelPasses,
+					});
+				}
 				ctx.clearRect(0, 0, width, height); ctx.drawImage(filterSurface, 0, 0);
 			}
 			continue;
@@ -513,6 +536,15 @@ function drawFrame2D(frame: any, ctx: CanvasRenderingContext2D | OffscreenCanvas
 			layer.drawImage(texture.source, -t.width / 2, -t.height / 2, t.width, t.height);
 		} else layer.drawImage(texture.source, 0, 0, width, height);
 		layer.restore();
+		const pixelPasses = pixelEffectPasses(item.effectPassGroups);
+		if (pixelPasses.length > 0) {
+			applyEffectPasses({
+				source: layerSurface,
+				width,
+				height,
+				passes: pixelPasses,
+			});
+		}
 		const mask = item.mask ? textures.get(item.mask.textureId) : null;
 		if (mask) {
 			layer.save(); layer.globalCompositeOperation = item.mask.inverted ? "destination-out" : "destination-in";
@@ -642,7 +674,8 @@ export function renderFrame(frame: any): void {
 				layers: gpuLayers,
 			});
 		} catch (err) {
-			console.warn("[WebGPU] Render pass failed:", err);
+			console.error("[WebGPU] Render pass failed:", err);
+			throw err;
 		} finally {
 			for (const texture of temporaries) webGpuEngine.releaseTexture(texture);
 		}
@@ -669,24 +702,7 @@ export async function initializeGpu(): Promise<void> {
 	if (typeof window !== "undefined" && typeof navigator !== "undefined" && navigator.gpu) {
 		try {
 			const success = await webGpuEngine.initialize();
-			if (success && webGpuEngine.device && compositorCanvas) {
-				try {
-					if (!compositorGpuContext) {
-						compositorGpuContext = compositorCanvas.getContext("webgpu") as GPUCanvasContext | null;
-					}
-					if (compositorGpuContext) {
-						compositorGpuContext.configure({
-							device: webGpuEngine.device,
-							format: webGpuEngine.preferredFormat,
-							alphaMode: "premultiplied",
-						});
-						compositor2dContext = null;
-						console.info("%c[Compositor] WebGPU hardware context active and configured.", "color: #10b981; font-weight: bold;");
-					}
-				} catch (e) {
-					console.warn("[WebGPU] Canvas context configure notice:", e);
-				}
-			}
+			if (success && compositorCanvas) ensureCompositorContext();
 		} catch (err) {
 			console.warn("[WebGPU] Initialization error:", err);
 		}

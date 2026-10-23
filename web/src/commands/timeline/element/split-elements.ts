@@ -17,7 +17,10 @@ import {
 } from "@/wasm";
 
 export class SplitElementsCommand extends Command {
+	override readonly ripplesLeadingEdge: boolean;
+	override readonly forcesRipple: boolean;
 	private savedState: SceneTracks | null = null;
+	private appliedState: SceneTracks | null = null;
 	private rightSideElements: { trackId: string; elementId: string }[] = [];
 	private readonly elements: { trackId: string; elementId: string }[];
 	private readonly splitTime: MediaTime;
@@ -27,15 +30,19 @@ export class SplitElementsCommand extends Command {
 		elements,
 		splitTime,
 		retainSide = "both",
+		forceRipple = false,
 	}: {
 		elements: { trackId: string; elementId: string }[];
 		splitTime: MediaTime;
 		retainSide?: "both" | "left" | "right";
+		forceRipple?: boolean;
 	}) {
 		super();
 		this.elements = elements;
 		this.splitTime = splitTime;
 		this.retainSide = retainSide;
+		this.ripplesLeadingEdge = retainSide === "right";
+		this.forcesRipple = forceRipple;
 	}
 
 	getRightSideElements(): { trackId: string; elementId: string }[] {
@@ -48,10 +55,15 @@ export class SplitElementsCommand extends Command {
 		this.rightSideElements = [];
 
 		const splitTrack = <
-			TTrack extends { id: string; elements: TimelineElement[] },
+			TTrack extends {
+				id: string;
+				elements: TimelineElement[];
+				locked?: boolean;
+			},
 		>(
 			track: TTrack,
 		): TTrack => {
+			if (track.locked === true) return track;
 			const elementsToSplit = this.elements.filter(
 				(target) => target.trackId === track.id,
 			);
@@ -197,6 +209,7 @@ export class SplitElementsCommand extends Command {
 			audio: this.savedState.audio.map((track) => splitTrack(track)),
 		};
 
+		this.appliedState = updatedTracks;
 		editor.timeline.updateTracks(updatedTracks);
 
 		if (this.rightSideElements.length > 0) {
@@ -210,5 +223,17 @@ export class SplitElementsCommand extends Command {
 			const editor = EditorCore.getInstance();
 			editor.timeline.updateTracks(this.savedState);
 		}
+	}
+
+	redo(): CommandResult | undefined {
+		if (!this.appliedState) {
+			return this.execute();
+		}
+		// Re-splitting generates new clip and boundary-keyframe IDs, invalidating
+		// later history entries that still refer to the original split result.
+		EditorCore.getInstance().timeline.updateTracks(this.appliedState);
+		return this.rightSideElements.length > 0
+			? createElementSelectionResult(this.rightSideElements)
+			: undefined;
 	}
 }

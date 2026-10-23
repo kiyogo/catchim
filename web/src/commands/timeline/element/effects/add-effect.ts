@@ -3,6 +3,8 @@ import { EditorCore } from "@/core";
 import { isVisualElement, updateElementInSceneTracks } from "@/timeline";
 import type { SceneTracks, VisualElement } from "@/timeline";
 import { buildDefaultEffectInstance } from "@/effects";
+import { isTrackLocked } from "@/timeline/track-capabilities";
+import { findTrackInSceneTracks } from "@/timeline/track-element-update";
 
 function addEffectToElement({
 	element,
@@ -41,17 +43,25 @@ export class AddClipEffectCommand extends Command {
 	execute(): CommandResult | undefined {
 		const editor = EditorCore.getInstance();
 		this.savedState = editor.scenes.getActiveScene().tracks;
+		const track = findTrackInSceneTracks({
+			tracks: this.savedState,
+			trackId: this.trackId,
+		});
+		const element = track?.elements.find(({ id }) => id === this.elementId);
+		if (!track || !element || isTrackLocked(track) || !isVisualElement(element)) {
+			this.savedState = null;
+			return;
+		}
 
 		const updatedTracks = updateElementInSceneTracks({
 			tracks: this.savedState,
 			trackId: this.trackId,
 			elementId: this.elementId,
-			elementPredicate: isVisualElement,
-		update: (element) => {
-			const updated = addEffectToElement({
-				element: element as VisualElement,
-				effectType: this.effectType,
-			});
+			update: (currentElement) => {
+				const updated = addEffectToElement({
+					element: currentElement as VisualElement,
+					effectType: this.effectType,
+				});
 				const effects = updated.effects ?? [];
 				this.effectId = effects[effects.length - 1]?.id ?? null;
 				return updated;

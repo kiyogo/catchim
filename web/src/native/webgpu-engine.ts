@@ -36,10 +36,12 @@ class WebGpuEngine {
 	private blurPipelineV: GPUComputePipeline | null = null;
 	private colorGradePipeline: GPUComputePipeline | null = null;
 	private chromaKeyPipeline: GPUComputePipeline | null = null;
+	private vignettePipeline: GPUComputePipeline | null = null;
 	private waveformPipeline: GPUComputePipeline | null = null;
 	private sampler: GPUSampler | null = null;
 	private whiteTexture: GPUTexture | null = null;
 	private effectBuffers: GPUBuffer[] = [];
+	private colorGradeBuffers: GPUBuffer[] = [];
 	private effectBufferIndex = 0;
 
 	async initialize(): Promise<boolean> {
@@ -88,6 +90,9 @@ class WebGpuEngine {
 					this.blurPipelineV = null;
 					this.colorGradePipeline = null;
 					this.chromaKeyPipeline = null;
+					this.vignettePipeline = null;
+					this.colorGradeBuffers = [];
+					this.effectBuffers = [];
 					this.texturePool = [];
 					this.initPromise = null;
 					if (typeof window !== "undefined") (window as any).__OPENCUT_WEBGPU_ACTIVE__ = false;
@@ -138,6 +143,21 @@ class WebGpuEngine {
 
 	get device(): GPUDevice | null {
 		return this.state.device;
+	}
+
+	get adapterName(): string {
+		const info = this.state.adapter?.info;
+		return [info?.vendor, info?.architecture, info?.device, info?.description]
+			.filter(Boolean).join(" · ") || "GPU không cung cấp tên";
+	}
+
+	get isHardwareAdapter(): boolean {
+		if (!this.isAvailable || !this.state.adapter) return false;
+		const adapter = this.state.adapter as GPUAdapter & { isFallbackAdapter?: boolean };
+		const info = adapter.info;
+		if (!info?.vendor && !info?.device && !info?.description) return false;
+		return adapter.isFallbackAdapter !== true &&
+			!/swiftshader|software|llvmpipe|lavapipe|warp/i.test(this.adapterName);
 	}
 
 	get preferredFormat(): GPUTextureFormat {
@@ -347,6 +367,19 @@ class WebGpuEngine {
 				g = luma + (g - luma) * sat_factor;
 				b = luma + (b - luma) * sat_factor;
 
+				if (abs(params.hue) > 0.001) {
+					let hue_rad = params.hue * 0.017453292519943295;
+					let cos_h = cos(hue_rad);
+					let sin_h = sin(hue_rad);
+					let u = -0.14713 * r - 0.28886 * g + 0.436 * b;
+					let v = 0.615 * r - 0.51499 * g - 0.10001 * b;
+					let u_rot = u * cos_h - v * sin_h;
+					let v_rot = u * sin_h + v * cos_h;
+					r = luma + 1.13983 * v_rot;
+					g = luma - 0.39465 * u_rot - 0.58060 * v_rot;
+					b = luma + 2.03211 * u_rot;
+				}
+
 				if (abs(params.gamma - 1.0) > 0.001 && params.gamma > 0.0) {
 					let inv_gamma = 1.0 / params.gamma;
 					r = pow(max(r, 0.0), inv_gamma);
@@ -410,6 +443,39 @@ class WebGpuEngine {
 				module: chromaKeyModule,
 				entryPoint: "cs_main",
 			},
+		});
+		const vignetteWgsl = `
+			struct VignetteParams {
+				amount: f32,
+				softness: f32,
+				roundness: f32,
+				width: u32,
+				height: u32,
+			};
+
+			@group(0) @binding(0) var<uniform> params: VignetteParams;
+			@group(0) @binding(1) var input_tex: texture_2d<f32>;
+			@group(0) @binding(2) var output_tex: texture_storage_2d<rgba8unorm, write>;
+
+			@compute @workgroup_size(16, 16)
+			fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
+				if (id.x >= params.width || id.y >= params.height) { return; }
+				let center = vec2<f32>(f32(params.width) * 0.5, f32(params.height) * 0.5);
+				let max_dist = max(length(center), 1.0);
+				let dx = f32(id.x) - center.x;
+				let dy = (f32(id.y) - center.y) * (1.0 + (1.0 - params.roundness));
+				let dist = length(vec2<f32>(dx, dy)) / max_dist;
+				let softness = max(params.softness, 0.01);
+				let falloff = clamp((dist - (1.0 - softness)) / softness, 0.0, 1.0);
+				let factor = 1.0 - falloff * params.amount;
+				let color = textureLoad(input_tex, vec2<i32>(id.xy), 0);
+				textureStore(output_tex, vec2<i32>(id.xy), vec4<f32>(color.rgb * factor, color.a));
+			}
+		`;
+		const vignetteModule = device.createShaderModule({ code: vignetteWgsl });
+		this.vignettePipeline = device.createComputePipeline({
+			layout: "auto",
+			compute: { module: vignetteModule, entryPoint: "cs_main" },
 		});
 
 		// 4. Separable Gaussian Blur Compute Shader
@@ -560,10 +626,22 @@ class WebGpuEngine {
 	beginEffectsFrame() { this.effectBufferIndex = 0; }
 	applyBlurPasses(source: GPUTexture, passes: Array<{ shader: string; uniforms: Record<string, number | number[]> }>, temporaries: GPUTexture[]): GPUTexture {
 		const device = this.state.device;
-		if (!device || !this.blurPipelineH) return source;
+		if (!device) return source;
 		let input = source;
 		for (const pass of passes) {
-			if (pass.shader !== "gaussian-blur") continue;
+			if (pass.shader === "color_grading") {
+				input = this.applyColorGradingPass({ source: input, pass, temporaries });
+				continue;
+			}
+			if (pass.shader === "chroma_key" && this.chromaKeyPipeline) {
+				input = this.applyChromaKeyPass({ source: input, pass, temporaries });
+				continue;
+			}
+			if (pass.shader === "vignette" && this.vignettePipeline) {
+				input = this.applyVignettePass({ source: input, pass, temporaries });
+				continue;
+			}
+			if (pass.shader !== "gaussian-blur" || !this.blurPipelineH) continue;
 			const sigma = Number(pass.uniforms.u_sigma ?? 0);
 			if (sigma < .001) continue;
 			const direction = pass.uniforms.u_direction as number[] ?? [1, 0];
@@ -584,6 +662,196 @@ class WebGpuEngine {
 			device.queue.submit([encoder.finish()]); input = output;
 		}
 		return input;
+	}
+
+	private applyChromaKeyPass({
+		source,
+		pass,
+		temporaries,
+	}: {
+		source: GPUTexture;
+		pass: { shader: string; uniforms: Record<string, number | number[]> };
+		temporaries: GPUTexture[];
+	}): GPUTexture {
+		const read = (key: string, fallback: number) => {
+			const value = pass.uniforms[key];
+			return typeof value === "number" && Number.isFinite(value)
+				? value
+				: fallback;
+		};
+		return this.applyComputeEffectPass({
+			source,
+			temporaries,
+			writeUniforms: (floats, integers) => {
+				floats[0] = read("keyR", 0);
+				floats[1] = read("keyG", 1);
+				floats[2] = read("keyB", 0);
+				floats[3] = Math.max(0.01, read("similarity", 0.4));
+				floats[4] = Math.max(0.001, read("smoothness", 0.1));
+				floats[5] = Math.max(0, read("spill", 0.1));
+				integers[6] = source.width;
+				integers[7] = source.height;
+			},
+			pipeline: this.chromaKeyPipeline!,
+		});
+	}
+
+	private applyVignettePass({
+		source,
+		pass,
+		temporaries,
+	}: {
+		source: GPUTexture;
+		pass: { shader: string; uniforms: Record<string, number | number[]> };
+		temporaries: GPUTexture[];
+	}): GPUTexture {
+		const read = (key: string, fallback: number) => {
+			const value = pass.uniforms[key];
+			return typeof value === "number" && Number.isFinite(value)
+				? value
+				: fallback;
+		};
+		return this.applyComputeEffectPass({
+			source,
+			temporaries,
+			writeUniforms: (floats, integers) => {
+				floats[0] = Math.max(0, Math.min(1, read("amount", 0.45)));
+				floats[1] = Math.max(0.01, Math.min(1, read("softness", 0.55)));
+				floats[2] = Math.max(0, Math.min(1, read("roundness", 1)));
+				integers[3] = source.width;
+				integers[4] = source.height;
+			},
+			pipeline: this.vignettePipeline!,
+		});
+	}
+
+	private applyComputeEffectPass({
+		source,
+		temporaries,
+		pipeline,
+		writeUniforms,
+	}: {
+		source: GPUTexture;
+		temporaries: GPUTexture[];
+		pipeline: GPUComputePipeline;
+		writeUniforms: (floats: Float32Array, integers: Uint32Array) => void;
+	}): GPUTexture {
+		const device = this.state.device;
+		if (!device) return source;
+		const bytes = new ArrayBuffer(32);
+		writeUniforms(new Float32Array(bytes), new Uint32Array(bytes));
+		const index = this.effectBufferIndex++;
+		const buffer =
+			this.effectBuffers[index] ??
+			(this.effectBuffers[index] = device.createBuffer({
+				size: bytes.byteLength,
+				usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+			}));
+		device.queue.writeBuffer(buffer, 0, bytes);
+		const output = this.acquireTexture({
+			width: source.width,
+			height: source.height,
+			format: "rgba8unorm",
+			usage:
+				GPUTextureUsage.TEXTURE_BINDING |
+				GPUTextureUsage.STORAGE_BINDING |
+				GPUTextureUsage.COPY_DST |
+				GPUTextureUsage.RENDER_ATTACHMENT,
+		});
+		temporaries.push(output);
+		const group = device.createBindGroup({
+			layout: pipeline.getBindGroupLayout(0),
+			entries: [
+				{ binding: 0, resource: { buffer } },
+				{ binding: 1, resource: source.createView() },
+				{ binding: 2, resource: output.createView() },
+			],
+		});
+		const encoder = device.createCommandEncoder();
+		const compute = encoder.beginComputePass();
+		compute.setPipeline(pipeline);
+		compute.setBindGroup(0, group);
+		compute.dispatchWorkgroups(
+			Math.ceil(source.width / 16),
+			Math.ceil(source.height / 16),
+		);
+		compute.end();
+		device.queue.submit([encoder.finish()]);
+		return output;
+	}
+
+	private applyColorGradingPass({
+		source,
+		pass,
+		temporaries,
+	}: {
+		source: GPUTexture;
+		pass: { shader: string; uniforms: Record<string, number | number[]> };
+		temporaries: GPUTexture[];
+	}): GPUTexture {
+		const device = this.state.device;
+		const pipeline = this.colorGradePipeline;
+		if (!device || !pipeline) return source;
+
+		const read = (key: string, fallback: number) => {
+			const value = pass.uniforms[key];
+			return typeof value === "number" && Number.isFinite(value)
+				? value
+				: fallback;
+		};
+		const bytes = new ArrayBuffer(48);
+		const floats = new Float32Array(bytes);
+		const integers = new Uint32Array(bytes);
+		floats[0] = read("brightness", 0);
+		floats[1] = read("contrast", 0);
+		floats[2] = read("saturation", 0);
+		floats[3] = read("exposure", 0);
+		floats[4] = read("temperature", 0);
+		floats[5] = read("tint", 0);
+		floats[6] = read("hue", 0);
+		floats[7] = Math.max(0.001, read("gamma", 1));
+		integers[8] = source.width;
+		integers[9] = source.height;
+
+		const index = this.effectBufferIndex++;
+		const buffer =
+			this.colorGradeBuffers[index] ??
+			(this.colorGradeBuffers[index] = device.createBuffer({
+				size: bytes.byteLength,
+				usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+			}));
+		device.queue.writeBuffer(buffer, 0, bytes);
+
+		const output = this.acquireTexture({
+			width: source.width,
+			height: source.height,
+			format: "rgba8unorm",
+			usage:
+				GPUTextureUsage.TEXTURE_BINDING |
+					GPUTextureUsage.STORAGE_BINDING |
+					GPUTextureUsage.COPY_DST |
+					GPUTextureUsage.RENDER_ATTACHMENT,
+		});
+		temporaries.push(output);
+		const group = device.createBindGroup({
+			layout: pipeline.getBindGroupLayout(0),
+			entries: [
+				{ binding: 0, resource: { buffer } },
+				{ binding: 1, resource: source.createView() },
+				{ binding: 2, resource: output.createView() },
+			],
+		});
+		const encoder = device.createCommandEncoder();
+		const compute = encoder.beginComputePass();
+		compute.setPipeline(pipeline);
+		compute.setBindGroup(0, group);
+		compute.dispatchWorkgroups(
+			Math.ceil(source.width / 16),
+			Math.ceil(source.height / 16),
+		);
+		compute.end();
+		device.queue.submit([encoder.finish()]);
+		return output;
 	}
 
 	private getLayerUniformBuffer(index: number): GPUBuffer {

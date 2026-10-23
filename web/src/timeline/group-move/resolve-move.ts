@@ -1,4 +1,6 @@
 import type { SceneTracks } from "@/timeline";
+import { isTrackLocked } from "@/timeline/track-capabilities";
+import { findTrackInSceneTracks } from "@/timeline/track-element-update";
 import { getTrackTypeForElementType } from "@/timeline/placement/compatibility";
 import { canPlaceTimeSpansOnTrack } from "@/timeline/placement/overlap";
 import type {
@@ -42,6 +44,18 @@ export function resolveGroupMove({
 	anchorStartTime: MediaTime;
 	target: GroupMoveTarget;
 }): GroupMoveResult | null {
+	if (
+		group.members.some((member) => {
+			const sourceTrack = findTrackInSceneTracks({
+				tracks,
+				trackId: member.trackId,
+			});
+			return !sourceTrack || isTrackLocked(sourceTrack);
+		})
+	) {
+		return null;
+	}
+
 	if (target.kind === "newTracks") {
 		return resolveNewTrackMove({
 			group,
@@ -78,6 +92,13 @@ function resolveExistingTrackMove({
 	if (!anchorTargetPlacement) {
 		return null;
 	}
+	const anchorTargetTrack = findTrackInSceneTracks({
+		tracks,
+		trackId: anchorTargetPlacement.trackId,
+	});
+	if (!anchorTargetTrack || isTrackLocked(anchorTargetTrack)) {
+		return null;
+	}
 
 	const targetTrackIdsByElementId = resolveExistingTrackIdsByElementId({
 		group,
@@ -90,9 +111,7 @@ function resolveExistingTrackMove({
 
 	const clampedAnchorStartTime = clampAnchorStartTime({
 		group,
-		tracks,
 		anchorStartTime,
-		targetTrackIdsByElementId,
 	});
 
 	const moves = group.members.map((member) => ({
@@ -156,9 +175,7 @@ function resolveNewTrackMove({
 
 	const clampedAnchorStartTime = clampAnchorStartTime({
 		group,
-		tracks,
 		anchorStartTime,
-		targetTrackIdsByElementId: new Map(),
 	});
 	const blockStartIndex = hasAudioMember
 		? clampAudioInsertIndex({
@@ -342,14 +359,10 @@ function findCompatibleTrackPlacement({
 
 function clampAnchorStartTime({
 	group,
-	tracks,
 	anchorStartTime,
-	targetTrackIdsByElementId,
 }: {
 	group: MoveGroup;
-	tracks: SceneTracks;
 	anchorStartTime: MediaTime;
-	targetTrackIdsByElementId: Map<string, string>;
 }): MediaTime {
 	const minimumAnchorStartTime = group.members.reduce(
 		(minimumStartTime, member) =>
@@ -364,49 +377,7 @@ function clampAnchorStartTime({
 				: minimumStartTime,
 		ZERO_MEDIA_TIME,
 	);
-	let clampedAnchorStartTime =
-		anchorStartTime < minimumAnchorStartTime
-			? minimumAnchorStartTime
-			: anchorStartTime;
-
-	const memberOnMainTrack = group.members.find(
-		(member) =>
-			targetTrackIdsByElementId.get(member.elementId) === tracks.main.id,
-	);
-	if (!memberOnMainTrack) {
-		return clampedAnchorStartTime;
-	}
-
-	const movingElementIds = new Set(
-		group.members.map((member) => member.elementId),
-	);
-	const requestedMainStartTime = addMediaTime({
-		a: clampedAnchorStartTime,
-		b: memberOnMainTrack.timeOffset,
-	});
-	const earliestStationaryMainStartTime = tracks.main.elements
-		.filter((element) => !movingElementIds.has(element.id))
-		.reduce<MediaTime | null>((earliestStartTime, element) => {
-			if (earliestStartTime == null || element.startTime < earliestStartTime) {
-				return element.startTime;
-			}
-
-			return earliestStartTime;
-		}, null);
-	if (
-		earliestStationaryMainStartTime == null ||
-		requestedMainStartTime <= earliestStationaryMainStartTime
-	) {
-		clampedAnchorStartTime = maxMediaTime({
-			a: minimumAnchorStartTime,
-			b: subMediaTime({
-				a: ZERO_MEDIA_TIME,
-				b: memberOnMainTrack.timeOffset,
-			}),
-		});
-	}
-
-	return clampedAnchorStartTime;
+	return maxMediaTime({ a: anchorStartTime, b: minimumAnchorStartTime });
 }
 
 function canApplyMovesToExistingTracks({
