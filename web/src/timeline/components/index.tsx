@@ -101,9 +101,7 @@ import { toast } from "sonner";
 import { downloadBlob } from "@/utils/browser";
 import { serializeSubtitleTrack, type SubtitleExportFormat } from "@/subtitles/export";
 
-const TRACKS_CONTAINER_MAX_HEIGHT = 800;
 const FALLBACK_CONTAINER_WIDTH = 1000;
-const TRACKS_CONTAINER_HEIGHT = { min: 0, max: TRACKS_CONTAINER_MAX_HEIGHT };
 const TRACK_ICONS: Record<TimelineTrack["type"], ReactNode> = {
 	video: <OcVideoIcon className="text-muted-foreground size-4 shrink-0" />,
 	text: (
@@ -254,9 +252,21 @@ export function Timeline() {
 			rulerScrollRef.current.scrollLeft = tracks.scrollLeft;
 		}
 		if (trackLabelsScrollRef.current) {
+			// Use the actual viewport height, including the native scrollbar size.
+			// Otherwise the labels clamp at a different scrollTop near the bottom.
+			trackLabelsScrollRef.current.style.height = `${tracks.clientHeight}px`;
 			trackLabelsScrollRef.current.scrollTop = tracks.scrollTop;
 		}
 	}, []);
+
+	useEffect(() => {
+		const viewport = tracksScrollRef.current;
+		if (!viewport) return;
+		const observer = new ResizeObserver(syncFollowers);
+		observer.observe(viewport);
+		syncFollowers();
+		return () => observer.disconnect();
+	}, [syncFollowers]);
 
 	// Single non-passive capture listener owns all wheel input. Prevents any
 	// native scroll or browser zoom from firing inside the timeline.
@@ -503,8 +513,7 @@ export function Timeline() {
 		seek,
 	});
 
-	const timelineHeaderHeight =
-		timelineHeaderHeightValue + TIMELINE_CONTENT_TOP_PADDING_PX;
+	const timelineHeaderHeight = timelineHeaderHeightValue;
 
 	return (
 		<section
@@ -522,7 +531,7 @@ export function Timeline() {
 
 			<div
 				data-engine="canvas-timeline"
-				className="relative flex flex-1 overflow-hidden"
+				className="relative flex min-h-0 flex-1 overflow-hidden"
 				ref={timelineRef}
 			>
 				<TrackLabelsPanel
@@ -534,7 +543,7 @@ export function Timeline() {
 				/>
 
 				<div
-					className="relative isolate flex flex-1 flex-col overflow-hidden"
+					className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
 					ref={tracksContainerRef}
 				>
 					<SelectionBox bounds={selectionBox?.bounds ?? null} />
@@ -581,7 +590,7 @@ export function Timeline() {
 					</div>
 
 					<ScrollArea
-						className="flex-1"
+						className="min-h-0 flex-1"
 						ref={tracksScrollRef}
 						data-timeline-scroll="true"
 						onScroll={() => {
@@ -599,16 +608,10 @@ export function Timeline() {
 								style={{
 									width: `${dynamicTimelineWidth}px`,
 									height: `${
-										Math.max(
-											TRACKS_CONTAINER_HEIGHT.min,
-											Math.min(
-												TRACKS_CONTAINER_HEIGHT.max,
-												getTotalTracksHeight({
-													tracks,
-													getExtraHeight: getTrackExpansionHeight,
-												}),
-											),
-										) + TIMELINE_CONTENT_TOP_PADDING_PX
+										getTotalTracksHeight({
+											tracks,
+											getExtraHeight: getTrackExpansionHeight,
+										}) + TIMELINE_CONTENT_TOP_PADDING_PX
 									}px`,
 								}}
 								onMouseDown={(event) => {
@@ -773,20 +776,21 @@ function TrackLabelsPanel({
 		<div
 			data-engine="canvas-track-headers"
 			data-component="timeline-track-labels"
-			className="flex shrink-0 flex-col border-r"
+			className="flex min-h-0 shrink-0 flex-col border-r"
 			style={{ width: `${TIMELINE_TRACK_LABELS_COLUMN_WIDTH_PX}px` }}
 		>
 			<div
 				className="shrink-0"
 				style={{ height: timelineHeaderHeight || 48 }}
 			/>
-			<div ref={trackLabelsRef} className="flex-1 overflow-hidden">
+			<div ref={trackLabelsRef} className="min-h-0 flex-1 overflow-hidden">
 				<div ref={trackLabelsScrollRef} className="relative size-full overflow-hidden">
 					<canvas
 						ref={canvasRef}
 						data-engine="canvas-track-headers"
-						className="pointer-events-none absolute top-0 left-0"
+						className="pointer-events-none absolute left-0"
 						style={{
+							top: TIMELINE_CONTENT_TOP_PADDING_PX,
 							width: `${TIMELINE_TRACK_LABELS_COLUMN_WIDTH_PX}px`,
 							height: `${getTotalTracksHeight({ tracks, getExtraHeight: getTrackExpansionHeight })}px`,
 						}}
@@ -794,7 +798,10 @@ function TrackLabelsPanel({
 					{tracks.length > 0 && (
 						<div
 							className="flex flex-col"
-							style={{ gap: `${TIMELINE_TRACK_GAP_PX}px` }}
+							style={{
+								gap: `${TIMELINE_TRACK_GAP_PX}px`,
+								paddingTop: TIMELINE_CONTENT_TOP_PADDING_PX,
+							}}
 						>
 							{tracks.map((track, index) => {
 								const expandedRows = trackExpandedRowsMap[index];
@@ -804,7 +811,7 @@ function TrackLabelsPanel({
 									<div
 										key={track.id}
 										className={cn(
-											"group flex flex-col",
+											"group flex shrink-0 flex-col",
 											tracksWithSelection.has(track.id) &&
 												SELECTED_TRACK_ROW_CLASS,
 										)}

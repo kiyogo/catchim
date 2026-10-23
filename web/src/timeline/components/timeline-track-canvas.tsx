@@ -87,6 +87,7 @@ export function TimelineTrackCanvas({
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const rafIdRef = useRef<number | null>(null);
 	const viewportOffsetRef = useRef(0);
+	const viewportTopRef = useRef(0);
 	const drawRef = useRef<() => void>(() => {});
 
 	const { isElementSelected } = useElementSelection();
@@ -110,6 +111,9 @@ export function TimelineTrackCanvas({
 	// Compute clip geometries with Rust WASM assistance & live drag state
 	const draggingView = dragView.kind === "dragging" ? dragView : null;
 	const isDragging = draggingView !== null;
+	const hasDraggedElements = activeTrack.elements.some((element) =>
+		draggingView?.memberTimeOffsets.has(element.id),
+	);
 	const elementLayouts = useMemo(() => {
 		return activeTrack.elements.map((el) => {
 			const dragTimeOffset = draggingView
@@ -174,25 +178,31 @@ export function TimelineTrackCanvas({
 		const offset = scroll?.scrollLeft ?? 0;
 		viewportOffsetRef.current = offset;
 		const width = Math.max(1, scroll?.clientWidth ?? container.clientWidth);
+		// A dragged clip can leave its source row in either direction. Allocate
+		// its full vertical bounds instead of clipping it to the source height.
+		const viewportTop = Math.min(0, ...elementLayouts.map((item) => item.dragOffsetY));
+		const viewportBottom = trackHeight + Math.max(0, ...elementLayouts.map((item) => item.dragOffsetY));
+		viewportTopRef.current = viewportTop;
 		const height = trackHeight;
+		const canvasHeight = viewportBottom - viewportTop;
 
 		const pixelW = Math.ceil(width * dpr);
-		const pixelH = Math.ceil(height * dpr);
+		const pixelH = Math.ceil(canvasHeight * dpr);
 
 		if (canvas.width !== pixelW || canvas.height !== pixelH) {
 			canvas.width = pixelW;
 			canvas.height = pixelH;
 			canvas.style.width = `${width}px`;
-			canvas.style.height = `${height}px`;
+			canvas.style.height = `${canvasHeight}px`;
 		}
-		canvas.style.transform = `translateX(${offset}px)`;
+		canvas.style.transform = `translate(${offset}px, ${viewportTop}px)`;
 
 		const ctx = canvas.getContext("2d");
 		if (!ctx) return;
 
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-		ctx.clearRect(0, 0, width, height);
-		ctx.translate(-offset, 0);
+		ctx.clearRect(0, 0, width, canvasHeight);
+		ctx.translate(-offset, -viewportTop);
 
 		// 1. Draw empty dashed placeholder if no elements
 		if (activeTrack.elements.length === 0) {
@@ -496,7 +506,7 @@ export function TimelineTrackCanvas({
 		const canvas = canvasRef.current;
 		if (!canvas) return;
 		const px = e.nativeEvent.offsetX + viewportOffsetRef.current;
-		const py = e.nativeEvent.offsetY;
+		const py = e.nativeEvent.offsetY + viewportTopRef.current;
 
 		const hit = hitTestAt(px, py);
 		const newCursor = hit
@@ -514,7 +524,7 @@ export function TimelineTrackCanvas({
 		const canvas = canvasRef.current;
 		if (!canvas) return;
 		const px = e.nativeEvent.offsetX + viewportOffsetRef.current;
-		const py = e.nativeEvent.offsetY;
+		const py = e.nativeEvent.offsetY + viewportTopRef.current;
 
 		const hit = hitTestAt(px, py);
 
@@ -574,7 +584,7 @@ export function TimelineTrackCanvas({
 		const canvas = canvasRef.current;
 		if (!canvas) return;
 		const px = e.nativeEvent.offsetX + viewportOffsetRef.current;
-		const py = e.nativeEvent.offsetY;
+		const py = e.nativeEvent.offsetY + viewportTopRef.current;
 
 		const hit = hitTestAt(px, py);
 		if (hit) {
@@ -589,12 +599,12 @@ export function TimelineTrackCanvas({
 	return (
 		<div
 			ref={containerRef}
-			className="relative size-full overflow-hidden"
+			className={`relative size-full ${hasDraggedElements ? "overflow-visible" : "overflow-hidden"}`}
 			style={{ zIndex: TIMELINE_LAYERS.trackContent }}
 		>
 			<canvas
 				ref={canvasRef}
-				className="block"
+				className="absolute top-0 left-0 block"
 				data-engine="canvas-2d"
 				data-track-type={track.type}
 				data-track-id={track.id}
