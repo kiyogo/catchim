@@ -1,8 +1,9 @@
 import type { TimelineTrack, TimelineElement } from "@/timeline";
 import type { ComputeDropTargetParams, DropTarget } from "@/timeline";
 import { resolveTrackPlacement } from "@/timeline/placement";
+import { getTrackTypeForElementType } from "@/timeline/placement/compatibility";
 import { TIMELINE_TRACK_GAP_PX } from "./layout";
-import { getTrackHeight } from "./track-layout";
+import { getTrackHeight, getTotalTracksHeight } from "./track-layout";
 import {
 	mediaTime,
 	type MediaTime,
@@ -156,8 +157,18 @@ export function computeDropTarget({
 		};
 	}
 
+	const bottomTrack = orderedTracks[orderedTracks.length - 1];
+	const tracksHeight = getTotalTracksHeight({ tracks: orderedTracks });
+	// Reuse an empty compatible bottom row for internal drags into the gutter.
+	// Otherwise a video drop below main creates an overlay above it again.
+	const reuseBottomRow = !isExternalDrop &&
+		mouseY >= tracksHeight &&
+		bottomTrack.elements.length === 0 &&
+		bottomTrack.type === getTrackTypeForElementType({ elementType });
 	const trackAtMouse = getTrackAtY({
-		mouseY,
+		mouseY: reuseBottomRow
+			? tracksHeight - getTrackHeight({ type: bottomTrack.type }) / 2
+			: mouseY,
 		tracks: orderedTracks,
 		verticalDragDirection,
 	});

@@ -18,6 +18,7 @@ import {
 	ZERO_MEDIA_TIME,
 } from "@/wasm";
 import { TIMELINE_DRAG_THRESHOLD_PX } from "@/timeline/components/interaction";
+import { TIMELINE_CONTENT_TOP_PADDING_PX } from "@/timeline/components/layout";
 import type { FrameRate } from "opencut-wasm";
 import { computeDropTarget } from "@/timeline/components/drop-target";
 import { getMouseTimeFromClientX } from "@/timeline/drag-utils";
@@ -230,13 +231,11 @@ function resolveDropTarget({
 	if (!movingElement) return null;
 
 	const scrollRect = scrollContainer.getBoundingClientRect();
-	const headerHeight =
-		viewport.getHeaderEl()?.getBoundingClientRect().height ?? 0;
-
 	return computeDropTarget({
 		elementType: movingElement.type,
 		mouseX: clientX - scrollRect.left + scrollContainer.scrollLeft,
-		mouseY: clientY - scrollRect.top + scrollContainer.scrollTop - headerHeight,
+		// The ruler is outside this scroll viewport, so it is already excluded.
+		mouseY: clientY - scrollRect.top + scrollContainer.scrollTop - TIMELINE_CONTENT_TOP_PADDING_PX,
 		tracks,
 		playheadTime: snappedTime,
 		isExternalDrop: false,
@@ -717,6 +716,12 @@ export class ElementInteractionController {
 			return;
 		}
 
+		// Mouseup can carry a newer position than the last mousemove (including
+		// after scrolling). Resolve the destination at the actual release point.
+		const scrollContainer = this.deps.viewport.getTracksScrollEl();
+		if (scrollContainer) {
+			this.updateActiveDrag({ mousedown, drag, clientX, clientY, scrollContainer });
+		}
 		const { moveGroup, groupMoveResult } = drag;
 		if (!groupMoveResult) {
 			this.finishSession();
