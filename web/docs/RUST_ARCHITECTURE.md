@@ -84,3 +84,7 @@ Feature evidence and remaining work: [VIDEO_EDITOR_FEATURE_MATRIX.md](./VIDEO_ED
 `audio_export.rs::encode_pcm16` owns planar-to-interleaved sample quantization, finite-value handling and little-endian PCM16 serialization. `native/audio-export.ts` copies bounded chunks (at most 65,536 frames) through WASM scratch memory and frees it in every branch. `export/wav.ts` writes the RIFF container and yields between chunks for cancellation. Audio-only export bypasses CanvasRenderer, WebGPU and the video encoder.
 
 New required ABI exports: `ocw_caption_validate_range`, `ocw_caption_offset_ranges`, `ocw_caption_split_range`, `ocw_caption_merge_ranges`, `ocw_export_resolve_range`, `ocw_audio_encode_pcm16`. Build synchronization verifies all six. No project/storage schema change is introduced by these workflows.
+
+## Standalone deployment contract
+
+Next.js standalone output requires `.next/static` and `public` to be copied beside `server.js`. `scripts/prepare-standalone.mjs` runs after Next build, `scripts/start-standalone.mjs` verifies those files and defaults PORT to 3300, and `scripts/check-web-assets.mjs` fetches all JS/CSS referenced by selected page routes and compiles the served WASM. Serving HTML with status 200 does not establish that the editor client can load.

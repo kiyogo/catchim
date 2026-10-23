@@ -5,7 +5,10 @@
   "packageManager": "bun@1.2.18",
   "scripts": {
     "dev": "next dev --turbopack -p 3300",
-    "build": "npm run build:rust:wasm && next build",
+    "build": "npm run build:rust:wasm && next build && npm run prepare:standalone",
+    "prepare:standalone": "node scripts/prepare-standalone.mjs",
+    "start:standalone": "node scripts/start-standalone.mjs",
+    "check:web": "node scripts/check-web-assets.mjs",
     "build:browser": "npm run build:rust:wasm && vite build --config vite.browser.config.ts",
     "build:rust:wasm": "node scripts/build-rust-wasm.mjs",
     "start": "next start",

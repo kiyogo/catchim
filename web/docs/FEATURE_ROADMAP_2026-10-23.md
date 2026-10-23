@@ -186,6 +186,8 @@ Bắt đầu với **Gói 1, lát đầu**: transition dissolve/fade + fade in/o
 
 Kiểm tra mốc Gói 9/10: `npx vitest run --maxWorkers=4` **80 file / 401 test PASS**; `cargo test --manifest-path rust/crates/opencut_engine/Cargo.toml --lib` **51 test PASS**; TypeScript và production build PASS. HTTP `/`, `/projects`, editor và WASM PASS; artifact mới 120.448 byte có đủ ABI caption/range/PCM. Browser automation vẫn bị Work settings chặn; chưa coi đây là GUI, microphone hoặc file video đầu ra QA.
 
+Đã phát hiện và sửa lỗi đóng gói production standalone: HTML 200 nhưng client chunks 404 vì thiếu `.next/static`. Build hiện copy đủ JS/CSS/public; `start:standalone` kiểm tra bộ file và mặc định cổng 3300. `check:web` đã xác nhận **3 route + 22 JS/CSS assets + WASM hợp lệ**. Đây là kiểm tra tải dependency thực tế, vẫn chưa thay browser interaction QA.
+
 ### Các lát tiếp theo
 
 - LUT `.cube` với parser giới hạn/kiểm lỗi, pass renderer dùng chung và before/after compare.

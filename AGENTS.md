@@ -17,6 +17,9 @@ Run commands from `web/` unless noted.
 
 - Development server: `npm run dev`
 - Next.js production build: `npm run build`
+- Standalone production assets: `npm run prepare:standalone` (also runs after `next build` through the build script). Next standalone output must include both `.next/static` and `public`; an HTML 200 response alone can hide missing client JavaScript.
+- Start packaged production on port 3300 by default: `npm run start:standalone` (`PORT` overrides the default).
+- Verify pages and every referenced JS/CSS asset plus the served WASM: `npm run check:web -- http://localhost:3300 / /projects /editor/<project-id>`. This is an HTTP asset check, not browser interaction or encoded-video QA.
 - Browser/Vite build: `npm run build:browser`
 - Rust/WASM core build and browser artifact sync: `npm run build:rust:wasm` (`build` and `build:browser` invoke it automatically)
 - Lint: `npm run lint`
