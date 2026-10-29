@@ -14,6 +14,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import type { TranslationKey } from "@/i18n";
+import { Sparkles } from "lucide-react";
 
 export const TAB_KEYS = [
 	"media",
@@ -25,6 +26,7 @@ export const TAB_KEYS = [
 	"captions",
 	"adjustment",
 	"settings",
+	"agent",
 ] as const;
 
 export type Tab = (typeof TAB_KEYS)[number];
@@ -38,6 +40,7 @@ const createHugeiconsIcon = ({ icon }: { icon: IconSvgElement }) => {
 };
 
 export const tabs = {
+	agent: { icon: Sparkles, labelKey: "assets.agent" },
 	media: {
 		icon: createHugeiconsIcon({ icon: Folder03Icon }),
 		labelKey: "assets.media",

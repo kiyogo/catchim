@@ -95,6 +95,7 @@ export async function handleMcpRequest(
 			: {
 					isError: true,
 					content: [{ type: "text" as const, text: result.error }],
+					structuredContent: { error: { code: result.code ?? "EDITOR_ERROR", message: result.error } },
 				};
 	});
 	server.setRequestHandler(ListResourcesRequestSchema, async () => ({

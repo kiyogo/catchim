@@ -17,6 +17,8 @@ export interface EditorConnection extends McpCredentials {
 	projectName: string;
 	lastSeen: number;
 	pending: Map<string, PendingJob>;
+	rateWindowStart: number;
+	rateCount: number;
 }
 
 /** Browser connections are separate from MCP protocol/transport sessions. */
@@ -55,6 +57,8 @@ export class McpBroker {
 			bridgeToken: randomBytes(32).toString("base64url"),
 			lastSeen: this.now(),
 			pending: new Map(),
+			rateWindowStart: this.now(),
+			rateCount: 0,
 		};
 		this.connections.set(connection.id, connection);
 		return connection;
@@ -138,6 +142,11 @@ export class McpBroker {
 				ok: false,
 				error: "Request cancelled before dispatch",
 			});
+		if (this.now() - connection.rateWindowStart >= 60000) {
+			connection.rateWindowStart = this.now();
+			connection.rateCount = 0;
+		}
+		if (++connection.rateCount > 120) return Promise.resolve({ ok: false, code: "RATE_LIMIT", error: "Maximum 120 tool calls per minute per connection" });
 		if (connection.pending.size >= 16)
 			return Promise.resolve({
 				ok: false,

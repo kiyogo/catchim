@@ -16,6 +16,7 @@ import { EffectsView } from "@/effects/components/assets-view";
 import { AdjustmentView } from "@/effects/components/adjustment-view";
 import { TransitionsView } from "@/transitions/transitions-view";
 import { cn } from "@/utils/ui";
+import { AgentPanel } from "@/ai/panel";
 
 export function AssetsPanel({
 	showTabBar = true,
@@ -27,6 +28,7 @@ export function AssetsPanel({
 	const { activeTab } = useAssetsPanelStore();
 
 	const viewMap: Record<Tab, React.ReactNode> = {
+		agent: <AgentPanel />,
 		media: <MediaView />,
 		sounds: <SoundsView />,
 		text: <TextView />,

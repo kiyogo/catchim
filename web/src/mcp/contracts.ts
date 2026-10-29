@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { editPlanSchema } from "@/ai/contracts";
 
 const seconds = z.number().finite().min(0).max(604800);
 const id = z.string().min(1).max(200);
@@ -19,6 +20,11 @@ const page = {
 };
 
 export const toolInputs = {
+	catchim_agent_context: z.object({}).strict(),
+	catchim_preview_plan: z.object({ plan: editPlanSchema }).strict(),
+	catchim_apply_plan: z.object({ plan: editPlanSchema }).strict(),
+	catchim_agent_history: z.object({}).strict(),
+	catchim_list_effects: z.object({}).strict(),
 	catchim_get_project: z.object({}).strict(),
 	catchim_list_media: z.object(page).strict(),
 	catchim_get_timeline: z.object({ ...page, trackId: id.optional() }).strict(),
@@ -127,6 +133,11 @@ export const toolDetails: Record<
 	EditorToolName,
 	{ description: string; readOnly: boolean; destructive?: boolean }
 > = {
+	catchim_agent_context: { description: "Read project revision, frame rate, selection, timeline and imported media metadata for edit planning. No media bytes or network transfer.", readOnly: true },
+	catchim_preview_plan: { description: "Validate a revision-bound atomic edit plan and return a detached timeline diff without changing the project. Does not render frames. Operation times are integer frames at project FPS.", readOnly: true },
+	catchim_apply_plan: { description: "Apply a validated plan atomically as one shared undo step. Checks revision, permission, scope, locked tracks, references and ranges again. Plan ID is idempotent for the last 100 applied plans in this editor instance. Never retries a delivered mutation automatically.", readOnly: false },
+	catchim_agent_history: { description: "Read the last 100 plan commit/rejection audit entries in this editor instance. Contains no tokens or media data.", readOnly: true },
+	catchim_list_effects: { description: "Discover implemented effect types and their editable parameter schemas. Only these registered types can be added by a plan.", readOnly: true },
 	catchim_get_project: {
 		description:
 			"Read the connected project's settings, scenes, playhead and history availability. Times in this API are seconds. Only the explicitly connected browser tab is accessible.",
@@ -216,7 +227,7 @@ export const toolDetails: Record<
 };
 
 export type BridgeResult =
-	{ ok: true; data: Record<string, unknown> } | { ok: false; error: string };
+	{ ok: true; data: Record<string, unknown> } | { ok: false; error: string; code?: string };
 export interface BridgeJob {
 	id: string;
 	name: EditorToolName;

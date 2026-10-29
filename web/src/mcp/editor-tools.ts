@@ -16,6 +16,8 @@ import { isTrackLocked } from "@/timeline/track-capabilities";
 import type { ElementRef, TimelineElement, TimelineTrack } from "@/timeline";
 import { mediaTimeFromSeconds, TICKS_PER_SECOND } from "@/wasm";
 import { parseToolInput, toolDetails, type EditorToolName } from "./contracts";
+import { effectsRegistry, registerDefaultEffects } from "@/effects";
+import { PREVIEW_PERMISSION, type AgentPermission } from "@/ai/contracts";
 
 function allTracks(editor: EditorCore): TimelineTrack[] {
 	const tracks = editor.scenes.getActiveScene().tracks;
@@ -84,6 +86,7 @@ export async function executeEditorTool(
 	editor: EditorCore,
 	name: EditorToolName,
 	input: unknown,
+	authority: { permission: AgentPermission; getPermission?: () => AgentPermission; signal?: AbortSignal } = { permission: PREVIEW_PERMISSION },
 ): Promise<Record<string, unknown>> {
 	const project = editor.project.getActiveOrNull();
 	if (!project || editor.project.getIsLoading())
@@ -93,6 +96,20 @@ export async function executeEditorTool(
 			"A human edit is in progress. Finish the active drag or property edit first.",
 		);
 	switch (name) {
+		case "catchim_agent_context":
+			parseToolInput(name, input);
+			return editor.agent.getContext();
+		case "catchim_preview_plan":
+			return editor.agent.previewPlan(parseToolInput(name, input).plan, authority.permission, authority.signal);
+		case "catchim_apply_plan":
+			return editor.agent.applyPlan(parseToolInput(name, input).plan, authority.getPermission ?? authority.permission, authority.signal);
+		case "catchim_agent_history":
+			parseToolInput(name, input);
+			return { history: editor.agent.getHistory() };
+		case "catchim_list_effects":
+			parseToolInput(name, input);
+			registerDefaultEffects();
+			return { effects: effectsRegistry.getAll().map(({ type, name, category, params }) => ({ type, name, category, params: params.map(({ channels: _channels, ...rest }) => rest) })) };
 		case "catchim_get_project": {
 			parseToolInput(name, input);
 			return {

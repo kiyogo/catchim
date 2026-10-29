@@ -83,6 +83,7 @@ export const en: LocaleMessages = {
     selectFrameRate: "Select a frame rate",
   },
   assets: {
+    agent: "AI Agent",
     adjustment: "Adjustment",
     adjustmentComingSoon: "Adjustment view coming soon...",
     adjustmentSelectClip: "Select a visual clip to adjust its color.",

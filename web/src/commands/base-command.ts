@@ -19,6 +19,8 @@ export function createElementSelectionResult(
 }
 
 export abstract class Command {
+	/** Restore the command snapshot if execution or a command reactor fails. */
+	readonly atomic: boolean = false;
 	/** Commands that fully plan time positions can opt out of automatic ripple. */
 	readonly appliesOwnRipple: boolean = false;
 	/** Allows explicit ripple operations while the editor-wide ripple toggle is off. */

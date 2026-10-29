@@ -82,6 +82,7 @@ export const vi: LocaleMessages = {
     selectFrameRate: "Chọn tốc độ khung hình",
   },
   assets: {
+    agent: "Trợ lý AI",
     adjustment: "Điều chỉnh",
     adjustmentComingSoon: "Chế độ điều chỉnh sắp ra mắt...",
     adjustmentSelectClip: "Chọn một clip hình ảnh hoặc video để chỉnh màu.",

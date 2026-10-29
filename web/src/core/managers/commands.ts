@@ -26,17 +26,27 @@ export class CommandManager {
 			? (this.editor.scenes.getActiveSceneOrNull()?.tracks ?? null)
 			: null;
 		const previousSelection = this.getSelectionSnapshot();
-		const result = command.execute();
-		this.applyRippleIfEnabled({ beforeTracks, ripplesLeadingEdge: command.ripplesLeadingEdge });
-		const selectionOverride = this.applySelectionOverride(result);
-		this.runReactors();
+		let selectionOverride: EditorSelectionSnapshot | undefined;
+		try {
+			const result = command.execute();
+			this.applyRippleIfEnabled({ beforeTracks, ripplesLeadingEdge: command.ripplesLeadingEdge });
+			selectionOverride = this.applySelectionOverride(result);
+			this.runReactors();
+			if (command.atomic) commitBrowserHistory(this.editor);
+		} catch (error) {
+			if (command.atomic) {
+				command.undo();
+				this.editor.selection.restoreSnapshot({ snapshot: previousSelection });
+			}
+			throw error;
+		}
 		this.history.push({
 			command,
 			previousSelection,
 			selectionOverride,
 		});
 		this.redoStack = [];
-		commitBrowserHistory(this.editor);
+		if (!command.atomic) commitBrowserHistory(this.editor);
 		if (isBrowserHistoryActive() && this.history.length > 100) this.history.shift();
 		return command;
 	}
@@ -87,10 +97,20 @@ export class CommandManager {
 			? (this.editor.scenes.getActiveSceneOrNull()?.tracks ?? null)
 			: null;
 		const previousSelection = this.getSelectionSnapshot();
-		const result = entry.command.redo();
-		this.applyRippleIfEnabled({ beforeTracks, ripplesLeadingEdge: entry.command.ripplesLeadingEdge });
-		const selectionOverride = this.applySelectionOverride(result);
-		this.runReactors();
+		let selectionOverride: EditorSelectionSnapshot | undefined;
+		try {
+			const result = entry.command.redo();
+			this.applyRippleIfEnabled({ beforeTracks, ripplesLeadingEdge: entry.command.ripplesLeadingEdge });
+			selectionOverride = this.applySelectionOverride(result);
+			this.runReactors();
+		} catch (error) {
+			if (entry.command.atomic) {
+				entry.command.undo();
+				this.editor.selection.restoreSnapshot({ snapshot: previousSelection });
+				this.redoStack.push(entry);
+			}
+			throw error;
+		}
 
 		this.history.push({
 			command: entry.command,

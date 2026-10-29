@@ -10,6 +10,7 @@ import {
 	DELETE as disconnect,
 } from "@/app/api/mcp/bridge/route";
 import { POST as mcpPost } from "@/app/api/mcp/route";
+import { toolInputs } from "./contracts";
 
 describe("MCP Streamable HTTP", () => {
 	it("negotiates with the official client, lists tools/resources, relays reads and rejects unauthorized edits", async () => {
@@ -41,7 +42,7 @@ describe("MCP Streamable HTTP", () => {
 		try {
 			await client.connect(transport);
 			const tools = await client.listTools();
-			expect(tools.tools).toHaveLength(17);
+			expect(tools.tools.map((t) => t.name).sort()).toEqual(Object.keys(toolInputs).sort());
 			expect(
 				tools.tools.find((tool) => tool.name === "catchim_get_timeline")
 					?.annotations?.readOnlyHint,

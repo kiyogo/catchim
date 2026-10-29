@@ -141,6 +141,13 @@ export function MobileBottomNavigation({
 		clearElementSelection();
 		onCloseSheet();
 	};
+	const agentButton = (
+		<button type="button" onClick={() => handleOpenAssetTab("agent")}
+			className="flex h-14 min-w-[4.15rem] flex-col items-center justify-center gap-1 rounded-lg px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+			aria-label={t("assets.agent")}>
+			<Sparkles className="size-5" /><span className="truncate max-w-full">{t("assets.agent")}</span>
+		</button>
+	);
 
 	return (
 		<nav className="fixed inset-x-0 bottom-0 z-50 select-none border-t bg-background/95 pb-[calc(0.4rem+env(safe-area-inset-bottom))] pt-1 backdrop-blur-lg shadow-[0_-4px_20px_rgba(0,0,0,0.12)]">
@@ -277,6 +284,7 @@ export function MobileBottomNavigation({
 						<Sliders className="size-5" />
 						<span className="truncate max-w-full">{t("mobile.properties")}</span>
 					</button>
+					{agentButton}
 				</div>
 			) : (
 				/* ============================================================ */
@@ -411,6 +419,7 @@ export function MobileBottomNavigation({
 						<Settings className="size-5" />
 						<span className="truncate max-w-full">{t("mobile.settings")}</span>
 					</button>
+					{agentButton}
 				</div>
 			)}
 		</nav>

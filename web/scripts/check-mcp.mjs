@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { setTimeout as pause } from "node:timers/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const origin = "http://localhost:3300";
 const bridgeUrl = `${origin}/api/mcp/bridge`;
@@ -62,7 +63,7 @@ try {
 		}),
 	);
 	const listed = await client.listTools();
-	assert.equal(listed.tools.length, 17);
+	assert.equal(listed.tools.length, 22);
 	assert.equal(
 		(await client.callTool({ name: "catchim_get_project", arguments: {} }))
 			.structuredContent.synthetic,
@@ -126,6 +127,17 @@ try {
 		arguments: { seconds: 1.25 },
 	});
 	assert.equal(edit.structuredContent.input.seconds, 1.25);
+	const stdioClient = new Client({ name: "catchim-stdio-smoke", version: "1.0.0" });
+	try {
+		await stdioClient.connect(new StdioClientTransport({
+			command: process.execPath,
+			args: ["scripts/mcp-stdio.mjs"],
+			cwd: process.cwd(),
+			env: { ...process.env, CATCHIM_MCP_URL: endpoint, CATCHIM_MCP_TOKEN: credentials.accessToken },
+		}));
+		assert.equal((await stdioClient.listTools()).tools.length, 22);
+		assert.equal((await stdioClient.callTool({ name: "catchim_get_project", arguments: {} })).structuredContent.synthetic, true);
+	} finally { await stdioClient.close(); }
 } finally {
 	controller.abort();
 	await browser;
@@ -143,5 +155,5 @@ try {
 	);
 }
 console.log(
-	"MCP smoke PASS: 17 tools, 3 resources, protocol negotiation, live browser relay, permissions, token isolation and revocation. Synthetic connection only.",
+	"MCP smoke PASS: HTTP + stdio, 22 tools, 3 resources, protocol negotiation, browser relay, permissions, token isolation and revocation. Synthetic connection only.",
 );

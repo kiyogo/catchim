@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useEditor } from "@/editor/use-editor";
 import { executeEditorTool } from "./editor-tools";
+import { AgentError, EDIT_PERMISSION, PREVIEW_PERMISSION } from "@/ai/contracts";
 import {
 	isEditorToolName,
 	toolDetails,
@@ -97,11 +98,19 @@ export function McpEditorBridge() {
 								throw new Error("MCP editing permission is disabled");
 							result = {
 								ok: true,
-								data: await executeEditorTool(editor, job.name, job.input),
+								data: await executeEditorTool(editor, job.name, job.input, {
+									permission: state.allowEdits ? EDIT_PERMISSION : PREVIEW_PERMISSION,
+									getPermission: () => {
+										const live = useMcpConnection.getState();
+										return live.connection?.id === connection.id && live.allowEdits ? EDIT_PERMISSION : PREVIEW_PERMISSION;
+									},
+									signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, job.expiresAt - Date.now()))]),
+								}),
 							};
 						} catch (error) {
 							result = {
 								ok: false,
+								code: error instanceof AgentError ? error.code : "EDITOR_ERROR",
 								error: (error instanceof Error
 									? error.message
 									: "Editor operation failed"
