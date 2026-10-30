@@ -180,7 +180,12 @@ export class ProjectManager {
         }
       }
     } catch (error) {
-      console.error("Failed to load project:", error);
+      if (
+        !(error instanceof Error) ||
+        error.message !== `Project with id ${id} not found`
+      ) {
+        console.error("Failed to load project:", error);
+      }
       throw error;
     } finally {
       this.isLoading = false;
