@@ -16,7 +16,12 @@ import { EffectsView } from "@/effects/components/assets-view";
 import { AdjustmentView } from "@/effects/components/adjustment-view";
 import { TransitionsView } from "@/transitions/transitions-view";
 import { cn } from "@/utils/ui";
-import { AgentPanel } from "@/ai/panel";
+import dynamic from "next/dynamic";
+
+const McpWorkspace = dynamic(
+	() => import("@/mcp/workspace").then((module) => module.McpWorkspace),
+	{ ssr: false },
+);
 
 export function AssetsPanel({
 	showTabBar = true,
@@ -28,7 +33,7 @@ export function AssetsPanel({
 	const { activeTab } = useAssetsPanelStore();
 
 	const viewMap: Record<Tab, React.ReactNode> = {
-		agent: <AgentPanel />,
+		mcp: <McpWorkspace />,
 		media: <MediaView />,
 		sounds: <SoundsView />,
 		text: <TextView />,

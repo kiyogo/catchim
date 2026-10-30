@@ -2,7 +2,7 @@ import type { LocaleMessages } from "../types";
 
 export const vi: LocaleMessages = {
   mcp: {
-    description: "Kết nối trợ lý AI để đọc và chỉnh sửa dự án này qua MCP.",
+    description: "Kết nối MCP client để đọc và chỉnh sửa dự án này.",
     connected: "Đã kết nối",
     connecting: "Đang kết nối…",
     disabled: "Đã tắt",
@@ -10,8 +10,8 @@ export const vi: LocaleMessages = {
     enable: "Bật MCP",
     disable: "Tắt",
     allowEdits: "Cho phép chỉnh sửa",
-    readOnly: "Trợ lý chỉ được đọc dữ liệu dự án.",
-    readWrite: "Trợ lý được chỉnh sửa qua lịch sử undo/redo chung.",
+    readOnly: "MCP client chỉ được đọc dữ liệu dự án.",
+    readWrite: "MCP client được chỉnh sửa qua lịch sử undo/redo chung.",
     endpoint: "Địa chỉ MCP",
     token: "Token truy cập",
     copyConfig: "Sao chép cấu hình MCP",
@@ -82,7 +82,8 @@ export const vi: LocaleMessages = {
     selectFrameRate: "Chọn tốc độ khung hình",
   },
   assets: {
-    agent: "Trợ lý AI",
+    effectUnavailable: "Hiệu ứng chưa khả dụng. Định nghĩa vẫn được giữ trong dự án.",
+    mcp: "MCP",
     adjustment: "Điều chỉnh",
     adjustmentComingSoon: "Chế độ điều chỉnh sắp ra mắt...",
     adjustmentSelectClip: "Chọn một clip hình ảnh hoặc video để chỉnh màu.",

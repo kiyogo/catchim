@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { editPlanSchema } from "@/ai/contracts";
+import { editPlanSchema } from "@/mcp/edit-plan";
+import { generatedEffectSchema } from "@/effects/generated-schema";
 
 const seconds = z.number().finite().min(0).max(604800);
 const id = z.string().min(1).max(200);
@@ -20,10 +21,13 @@ const page = {
 };
 
 export const toolInputs = {
-	catchim_agent_context: z.object({}).strict(),
+	catchim_create_text_plan: z.object({ content: z.string().min(1).max(10000), startFrame: z.number().int().min(0).max(120000000), durationFrames: z.number().int().min(1).max(120000000) }).strict(),
+	catchim_create_effect_plan: z.object({ definition: generatedEffectSchema, elements: refs }).strict(),
+	catchim_validate_effect: z.object({ definition: generatedEffectSchema }).strict(),
+	catchim_get_context: z.object({}).strict(),
 	catchim_preview_plan: z.object({ plan: editPlanSchema }).strict(),
 	catchim_apply_plan: z.object({ plan: editPlanSchema }).strict(),
-	catchim_agent_history: z.object({}).strict(),
+	catchim_get_edit_history: z.object({}).strict(),
 	catchim_list_effects: z.object({}).strict(),
 	catchim_get_project: z.object({}).strict(),
 	catchim_list_media: z.object(page).strict(),
@@ -133,10 +137,13 @@ export const toolDetails: Record<
 	EditorToolName,
 	{ description: string; readOnly: boolean; destructive?: boolean }
 > = {
-	catchim_agent_context: { description: "Read project revision, frame rate, selection, timeline and imported media metadata for edit planning. No media bytes or network transfer.", readOnly: true },
+	catchim_create_text_plan: { description: "Create and validate an editable text insertion plan. Times are integer frames at project FPS. Returns a revision-bound plan without changing the timeline; preview then explicitly apply it.", readOnly: true },
+	catchim_create_effect_plan: { description: "Create and validate a plan that attaches a self-contained editable effect definition to specified visual clips. Graphs compose implemented blur/color-grading/vignette/chroma-key nodes; no arbitrary WGSL or code. Parameters remain editable and keyframable. Does not mutate the timeline.", readOnly: true },
+	catchim_validate_effect: { description: "Validate an effect definition with the Rust graph checker, parameter binding and resource limits. Returns supported renderer/dependency metadata. This is not GPU shader compilation.", readOnly: true },
+	catchim_get_context: { description: "Read project revision, frame rate, selection, timeline and imported media metadata for edit planning. No media bytes or network transfer.", readOnly: true },
 	catchim_preview_plan: { description: "Validate a revision-bound atomic edit plan and return a detached timeline diff without changing the project. Does not render frames. Operation times are integer frames at project FPS.", readOnly: true },
 	catchim_apply_plan: { description: "Apply a validated plan atomically as one shared undo step. Checks revision, permission, scope, locked tracks, references and ranges again. Plan ID is idempotent for the last 100 applied plans in this editor instance. Never retries a delivered mutation automatically.", readOnly: false },
-	catchim_agent_history: { description: "Read the last 100 plan commit/rejection audit entries in this editor instance. Contains no tokens or media data.", readOnly: true },
+	catchim_get_edit_history: { description: "Read the last 100 plan commit/rejection audit entries in this editor instance. Contains no tokens or media data.", readOnly: true },
 	catchim_list_effects: { description: "Discover implemented effect types and their editable parameter schemas. Only these registered types can be added by a plan.", readOnly: true },
 	catchim_get_project: {
 		description:

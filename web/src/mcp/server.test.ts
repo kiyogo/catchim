@@ -61,7 +61,10 @@ describe("MCP Streamable HTTP", () => {
 				arguments: { seconds: -1 },
 			});
 			expect(invalid.isError).toBe(true);
-			expect((await client.listResources()).resources).toHaveLength(3);
+			expect((await client.listResources()).resources).toHaveLength(5);
+			expect((await client.listPrompts()).prompts).toHaveLength(2);
+			expect((await client.getPrompt({ name: "catchim_effect_workflow", arguments: { request: "Create an editable grade" } })).messages[0].content).toMatchObject({ type: "text" });
+			expect(JSON.parse(((await client.readResource({ uri: "catchim://schemas/effect" })).contents[0] as { text: string }).text).properties).toHaveProperty("nodes");
 			expect(
 				(await client.readResource({ uri: "catchim://project" })).contents[0],
 			).toMatchObject({ mimeType: "application/json" });

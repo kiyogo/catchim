@@ -10,16 +10,17 @@ import { isTrackLocked } from "@/timeline/track-capabilities";
 import { resolveAnimationTarget } from "@/timeline/animation-targets";
 import { upsertPathKeyframe } from "@/animation";
 import { buildDefaultEffectInstance, effectsRegistry, registerDefaultEffects } from "@/effects";
+import { compileGeneratedEffect, getEffectDefinition } from "@/effects/generated";
 import { coerceParamValue, type ParamDefinition, type ParamValues } from "@/params";
 import { getElementParam } from "@/params/registry";
 import { mediaTimeFromSeconds, mediaTime, type MediaTime } from "@/wasm";
-import { AgentError, type AgentPermission, type AgentScope, type EditPlan } from "./contracts";
+import { McpEditError, type McpPermission, type McpScope, type EditPlan } from "./edit-plan";
 
 export function orderedTracks(tracks: SceneTracks): TimelineTrack[] {
 	return [...tracks.overlay, tracks.main, ...tracks.audio];
 }
-function invalid(message: string): never { throw new AgentError("INVALID_PLAN", message); }
-function denied(message: string): never { throw new AgentError("PERMISSION_DENIED", message); }
+function invalid(message: string): never { throw new McpEditError("INVALID_PLAN", message); }
+function denied(message: string): never { throw new McpEditError("PERMISSION_DENIED", message); }
 
 function checkedParams(values: ParamValues, find: (key: string) => ParamDefinition | undefined): ParamValues {
 	const result: ParamValues = {};
@@ -40,7 +41,7 @@ function checkedParams(values: ParamValues, find: (key: string) => ParamDefiniti
 /** Detached projection; reuses normal placement, parameter, animation and Rust time adapters. */
 export function projectEditPlan({ plan, tracks: original, settings, assets, permission, commit = false, signal }: {
 	plan: EditPlan; tracks: SceneTracks; settings: TProjectSettings; assets: MediaAsset[];
-	permission: AgentPermission; commit?: boolean; signal?: AbortSignal;
+	permission: McpPermission; commit?: boolean; signal?: AbortSignal;
 }) {
 	if (permission.level < (commit ? 3 : 2) || !permission.scopes.includes("project:read")) denied("This permission level cannot preview/apply an edit plan");
 	const toTime = (frame: number): MediaTime => mediaTimeFromSeconds({ seconds: frame * settings.fps.denominator / settings.fps.numerator });
@@ -48,14 +49,14 @@ export function projectEditPlan({ plan, tracks: original, settings, assets, perm
 	let tracks = original;
 	const completed = new Set<string>();
 	const changes: Array<{ operationId: string; type: string; trackId: string; elementId: string }> = [];
-	const requiredPermissions = new Set<AgentScope>(["project:read"]);
+	const requiredPermissions = new Set<McpScope>(["project:read"]);
 	registerDefaultEffects();
 	for (const entry of plan.operations) {
-		if (signal?.aborted) throw new AgentError("CANCELLED", "Plan cancelled before commit");
+		if (signal?.aborted) throw new McpEditError("CANCELLED", "Plan cancelled before commit");
 		if (completed.has(entry.operationId) || entry.dependsOn.some((id) => !completed.has(id))) invalid("Operation IDs must be unique and dependencies must precede their dependants");
 		completed.add(entry.operationId);
 		const op = entry.operation;
-		const required: AgentScope = op.type === "delete_clip" ? "clips:delete" : op.type.includes("effect") ? "effects:write" : "timeline:write";
+		const required: McpScope = op.type === "delete_clip" ? "clips:delete" : op.type.includes("effect") ? "effects:write" : "timeline:write";
 		requiredPermissions.add(required);
 		if (commit && !permission.scopes.includes(required)) denied(`Missing scope: ${required}`);
 		let track = op.trackId ? findTrackInSceneTracks({ tracks, trackId: op.trackId }) : undefined;
@@ -70,6 +71,8 @@ export function projectEditPlan({ plan, tracks: original, settings, assets, perm
 		let before: TimelineElement | undefined;
 		let after: TimelineElement;
 		if (isInsertion) {
+			if (op.trackId && op.newTrackId) invalid("Choose an existing track or a new track ID, not both");
+			if (op.newTrackId && orderedTracks(tracks).some((t) => t.id === op.newTrackId)) invalid("New track ID is already in use");
 			if (orderedTracks(tracks).some((t) => t.elements.some((el) => el.id === op.elementId))) invalid(`Duplicate clip ID: ${op.elementId}`);
 			const startTime = toTime(op.startFrame), duration = toTime(op.durationFrames);
 			if (duration <= 0) invalid("Clip duration is less than one tick");
@@ -92,7 +95,9 @@ export function projectEditPlan({ plan, tracks: original, settings, assets, perm
 			const placed = applyPlacement({ tracks, placementResult: placement, elements: [after] });
 			if (!placed) invalid("Editor rejected placement");
 			tracks = placed.updatedTracks;
-			track = findTrackInSceneTracks({ tracks, trackId: placed.targetTrackId })!;
+			const targetTrackId = op.newTrackId ?? placed.targetTrackId;
+			if (op.newTrackId) tracks = updateTrackInSceneTracks({ tracks, trackId: placed.targetTrackId, update: (t) => ({ ...t, id: op.newTrackId! }) });
+			track = findTrackInSceneTracks({ tracks, trackId: targetTrackId })!;
 		} else {
 			if (!track) invalid("Existing clip operations require a track");
 			before = track.elements.find((el) => el.id === op.elementId);
@@ -126,21 +131,21 @@ export function projectEditPlan({ plan, tracks: original, settings, assets, perm
 				default: {
 					if (!isVisualElement(before)) invalid("Effects require a visual clip");
 					const effects = before.effects ?? [];
-					if (op.type === "add_effect") {
+					if (op.type === "add_effect" || op.type === "create_effect") {
 						if (effects.some((e) => e.id === op.effectId)) invalid("Duplicate effect ID");
-						if (!effectsRegistry.has(op.effectType)) invalid(`Unsupported effect: ${op.effectType}`);
-						if (effects.length >= 16) throw new AgentError("RESOURCE_LIMIT", "Maximum 16 effects per clip");
-						const definition = effectsRegistry.get(op.effectType);
+						if (op.type === "add_effect" && !effectsRegistry.has(op.effectType)) invalid(`Unsupported effect: ${op.effectType}`);
+						if (effects.length >= 16) throw new McpEditError("RESOURCE_LIMIT", "Maximum 16 effects per clip");
+						const definition = op.type === "create_effect" ? compileGeneratedEffect(op.definition) : effectsRegistry.get(op.effectType);
 						const values = checkedParams(op.params, (key) => definition.params.find((p) => p.key === key));
-						const instance = buildDefaultEffectInstance({ effectType: op.effectType });
+						const instance = op.type === "create_effect" ? { id: op.effectId, type: definition.type, enabled: true, params: Object.fromEntries(definition.params.map((p) => [p.key, p.default])), generated: op.definition } : buildDefaultEffectInstance({ effectType: op.effectType });
 						after = { ...before, effects: [...effects, { ...instance, id: op.effectId, params: { ...instance.params, ...values } }] };
 					} else {
 						const effect = effects.find((e) => e.id === op.effectId);
 						if (!effect) invalid(`Effect not found: ${op.effectId}`);
 						if (op.type === "remove_effect") after = { ...before, effects: effects.filter((e) => e.id !== op.effectId) };
 						else {
-							if (!effectsRegistry.has(effect.type)) invalid("Effect dependency is unavailable");
-							const definition = effectsRegistry.get(effect.type);
+							const definition = getEffectDefinition(effect);
+							if (!definition) invalid("Effect dependency is unavailable");
 							const values = checkedParams(op.params, (key) => definition.params.find((p) => p.key === key));
 							after = { ...before, effects: effects.map((e) => e.id === op.effectId ? { ...e, enabled: op.enabled ?? e.enabled, params: { ...e.params, ...values } } : e) };
 						}

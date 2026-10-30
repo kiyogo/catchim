@@ -1,10 +1,13 @@
 import type { ParamDefinition, ParamValues } from "@/params";
+import type { GeneratedEffect } from "./generated-schema";
 
 export interface Effect {
 	id: string;
 	type: string;
 	params: ParamValues;
 	enabled: boolean;
+	/** Additive, self-contained recipe. Older/unsupported definitions must be preserved. */
+	generated?: GeneratedEffect;
 }
 
 export type EffectUniformValue = number | number[];

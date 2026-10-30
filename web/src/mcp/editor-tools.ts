@@ -17,7 +17,10 @@ import type { ElementRef, TimelineElement, TimelineTrack } from "@/timeline";
 import { mediaTimeFromSeconds, TICKS_PER_SECOND } from "@/wasm";
 import { parseToolInput, toolDetails, type EditorToolName } from "./contracts";
 import { effectsRegistry, registerDefaultEffects } from "@/effects";
-import { PREVIEW_PERMISSION, type AgentPermission } from "@/ai/contracts";
+import { PREVIEW_PERMISSION, type McpPermission } from "@/mcp/edit-plan";
+import { createTextPlan, createEffectPlan } from "./plan-builders";
+import { compileGeneratedEffect } from "@/effects/generated";
+import { initRustEngine } from "@/native/rust-engine";
 
 function allTracks(editor: EditorCore): TimelineTrack[] {
 	const tracks = editor.scenes.getActiveScene().tracks;
@@ -86,7 +89,7 @@ export async function executeEditorTool(
 	editor: EditorCore,
 	name: EditorToolName,
 	input: unknown,
-	authority: { permission: AgentPermission; getPermission?: () => AgentPermission; signal?: AbortSignal } = { permission: PREVIEW_PERMISSION },
+	authority: { permission: McpPermission; getPermission?: () => McpPermission; signal?: AbortSignal } = { permission: PREVIEW_PERMISSION },
 ): Promise<Record<string, unknown>> {
 	const project = editor.project.getActiveOrNull();
 	if (!project || editor.project.getIsLoading())
@@ -96,16 +99,27 @@ export async function executeEditorTool(
 			"A human edit is in progress. Finish the active drag or property edit first.",
 		);
 	switch (name) {
-		case "catchim_agent_context":
+		case "catchim_create_text_plan":
+			return { plan: await createTextPlan(editor, parseToolInput(name, input), authority.signal) };
+		case "catchim_create_effect_plan": {
+			const value = parseToolInput(name, input);
+			return { plan: await createEffectPlan(editor, value.definition, value.elements, authority.signal) };
+		}
+		case "catchim_validate_effect": {
+			await initRustEngine();
+			const definition = compileGeneratedEffect(parseToolInput(name, input).definition);
+			return { valid: true, type: definition.type, name: definition.name, parameters: definition.params, backend: "builtin-passes", arbitraryWgsl: false, maxNodes: 8, maxPasses: 32, maxPixels: 16777216 };
+		}
+		case "catchim_get_context":
 			parseToolInput(name, input);
-			return editor.agent.getContext();
+			return editor.mcp.getContext();
 		case "catchim_preview_plan":
-			return editor.agent.previewPlan(parseToolInput(name, input).plan, authority.permission, authority.signal);
+			return editor.mcp.previewPlan(parseToolInput(name, input).plan, authority.permission, authority.signal);
 		case "catchim_apply_plan":
-			return editor.agent.applyPlan(parseToolInput(name, input).plan, authority.getPermission ?? authority.permission, authority.signal);
-		case "catchim_agent_history":
+			return editor.mcp.applyPlan(parseToolInput(name, input).plan, authority.getPermission ?? authority.permission, authority.signal);
+		case "catchim_get_edit_history":
 			parseToolInput(name, input);
-			return { history: editor.agent.getHistory() };
+			return { history: editor.mcp.getHistory() };
 		case "catchim_list_effects":
 			parseToolInput(name, input);
 			registerDefaultEffects();

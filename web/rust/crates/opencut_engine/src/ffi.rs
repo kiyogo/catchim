@@ -24,6 +24,40 @@ use crate::compositor::{clear_buffer_rgba, composite_layer_rgba, BlendMode, Quad
 
 use std::alloc::{alloc, dealloc, Layout};
 
+/// Validate a bounded single-input effect graph and write its render order.
+/// Returns node count on success, -1 limit, -2 reference, -3 cycle, -4 unreachable.
+/// # Safety
+/// Pointers must address `count` aligned readable/writable i32 values respectively.
+#[no_mangle]
+pub unsafe extern "C" fn ocw_effect_graph_order(
+    inputs: *const i32,
+    count: usize,
+    output: usize,
+    order: *mut i32,
+) -> i32 {
+    if count == 0 || count > crate::effect_graph::MAX_EFFECT_NODES {
+        return -1;
+    }
+    if inputs.is_null() || order.is_null() {
+        return -2;
+    }
+    let values = unsafe { slice::from_raw_parts(inputs, count) };
+    match crate::effect_graph::render_order(values, output) {
+        Ok(indices) => {
+            for (offset, index) in indices.iter().enumerate() {
+                unsafe {
+                    *order.add(offset) = *index as i32;
+                }
+            }
+            count as i32
+        }
+        Err(crate::effect_graph::GraphError::ResourceLimit) => -1,
+        Err(crate::effect_graph::GraphError::InvalidReference) => -2,
+        Err(crate::effect_graph::GraphError::Cycle) => -3,
+        Err(crate::effect_graph::GraphError::UnreachableNode) => -4,
+    }
+}
+
 /// Returns -1 for invalid input/output, 0 for an empty interval, 1 for a window.
 /// On success writes [context_start, source_offset, source_duration, timeline_start].
 ///

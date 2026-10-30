@@ -4,6 +4,29 @@ import { canTrackHaveAudio } from "@/timeline/track-capabilities";
 import { canElementHaveAudio, hasMediaId } from "@/timeline/element-utils";
 import { isElementMuted } from "@/timeline/audio-state";
 import type { ExportRange } from "./range";
+import { getEffectDefinition } from "@/effects/generated";
+import { resolveEffectPasses } from "@/effects";
+
+export function getUnavailableExportEffects({ tracks, range, width, height }: { tracks: SceneTracks; range: ExportRange; width: number; height: number }): string[] {
+	const visualTracks = [...tracks.overlay, tracks.main];
+	const solo = visualTracks.some((t) => t.solo);
+	const unavailable: string[] = [];
+	for (const track of visualTracks) {
+		if (("hidden" in track && track.hidden) || (solo && !track.solo)) continue;
+		for (const element of track.elements) {
+			if (element.startTime >= range.end || element.startTime + element.duration <= range.start || ("hidden" in element && element.hidden) || !("effects" in element)) continue;
+			for (const effect of element.effects ?? []) {
+				if (!effect.enabled) continue;
+				try {
+					const definition = getEffectDefinition(effect);
+					if (!definition) throw new Error("definition unavailable");
+					if (effect.generated) resolveEffectPasses({ definition, effectParams: effect.params, width, height });
+				} catch { unavailable.push(`${element.name}: ${effect.type}`); }
+			}
+		}
+	}
+	return unavailable;
+}
 
 export function getMissingExportSources({
 	tracks,

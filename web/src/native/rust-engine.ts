@@ -7,6 +7,7 @@ import type { NativeTimelineBindings } from "./opencut-core";
 import { initializeExportRangeBindings } from "./export-range";
 import { initializeAudioExportBindings } from "./audio-export";
 import { initializeCaptionTimingBindings } from "./caption-timing";
+import { initializeEffectGraphBindings } from "./effect-graph";
 import type {
 	AudioBufferScheduleRequest,
 	AudioBufferScheduleResult,
@@ -338,6 +339,7 @@ export async function initRustEngine(): Promise<NativeTimelineBindings | null> {
 			initializeExportRangeBindings(exp, memory);
 			initializeAudioExportBindings(exp, memory);
 			initializeCaptionTimingBindings(exp, memory);
+			initializeEffectGraphBindings(exp, memory);
 
 			console.info("[RustEngine] WebAssembly core loaded and bound.");
 			return rustBindings;

@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { ParamValues } from "@/params";
+import type { ParamValues, ParamDefinition } from "@/params";
 import type { Effect } from "@/effects/types";
 import type { EffectElement, VisualElement } from "@/timeline";
-import { effectsRegistry } from "@/effects";
+import { getEffectDefinition } from "@/effects/generated";
 import { useEditor } from "@/editor/use-editor";
 import { useElementPreview } from "@/timeline/hooks/use-element-preview";
 import {
@@ -27,6 +27,9 @@ import { cn } from "@/utils/ui";
 import { Separator } from "@/components/ui/separator";
 import { useAssetsPanelStore } from "@/components/editor/panels/assets/assets-panel-store";
 import { useTranslation } from "@/i18n";
+import { useElementPlayhead } from "@/components/editor/panels/properties/hooks/use-element-playhead";
+import { useKeyframedParamProperty } from "@/components/editor/panels/properties/hooks/use-keyframed-param-property";
+import { buildEffectParamPath, resolveAnimationPathValueAtTime } from "@/animation";
 
 export function StandaloneEffectTab({
 	element,
@@ -179,6 +182,8 @@ export function ClipEffectsTab({
 							>
 								<EffectSection
 									effect={effect}
+									element={renderElement as VisualElement}
+									trackId={trackId}
 									renderParams={getRenderParams({ effectId: effect.id })}
 									previewParam={buildPreviewParam(effect.id)}
 									onCommit={commit}
@@ -238,6 +243,8 @@ function EmptyView() {
 
 function EffectSection({
 	effect,
+	element,
+	trackId,
 	renderParams,
 	previewParam,
 	onCommit,
@@ -245,6 +252,8 @@ function EffectSection({
 	onRemove,
 }: {
 	effect: Effect;
+	element?: VisualElement;
+	trackId?: string;
 	renderParams: ParamValues;
 	previewParam: (key: string) => (value: number | string | boolean) => void;
 	onCommit: () => void;
@@ -252,7 +261,8 @@ function EffectSection({
 	onRemove?: () => void;
 }) {
 	const { t } = useTranslation();
-	const definition = effectsRegistry.get(effect.type);
+	const definition = getEffectDefinition(effect);
+	if (!definition) return <div className="space-y-2 p-3 text-xs"><p role="status">{effect.type}: {t("assets.effectUnavailable")}</p>{onToggle && <Button size="sm" variant="outline" onClick={onToggle}>{effect.enabled ? "Disable" : "Enable"}</Button>}{onRemove && <Button size="sm" variant="outline" onClick={onRemove}>{t("timeline.deleteElement")}</Button>}</div>;
 
 	return (
 		<Section
@@ -301,12 +311,12 @@ function EffectSection({
 					{definition.params.map((param) => (
 						<div key={param.key} className="flex flex-col gap-3.5">
 							<div className="px-4">
-								<PropertyParamField
+								{effect.generated && element && trackId ? <GeneratedEffectParamField element={element} trackId={trackId} effect={effect} param={param} baseValue={renderParams[param.key] ?? param.default} /> : <PropertyParamField
 									param={param}
 									value={renderParams[param.key] ?? param.default}
 									onPreview={previewParam(param.key)}
 									onCommit={onCommit}
-								/>
+								/>}
 							</div>
 							<Separator />
 						</div>
@@ -315,4 +325,15 @@ function EffectSection({
 			</SectionContent>
 		</Section>
 	);
+}
+
+function GeneratedEffectParamField({ element, trackId, effect, param, baseValue }: { element: VisualElement; trackId: string; effect: Effect; param: ParamDefinition; baseValue: number | string | boolean }) {
+	const { localTime, isPlayheadWithinElementRange } = useElementPlayhead({ startTime: element.startTime, duration: element.duration });
+	const propertyPath = buildEffectParamPath({ effectId: effect.id, paramKey: param.key });
+	const resolvedValue = resolveAnimationPathValueAtTime({ animations: element.animations, propertyPath, localTime, fallbackValue: baseValue });
+	const animated = useKeyframedParamProperty({
+		param, trackId, elementId: element.id, animations: element.animations, propertyPath, localTime, isPlayheadWithinElementRange, resolvedValue,
+		buildBaseUpdates: ({ value }) => ({ effects: (element.effects ?? []).map((existing) => existing.id === effect.id ? { ...existing, params: { ...existing.params, [param.key]: value } } : existing) }),
+	});
+	return <PropertyParamField param={param} value={resolvedValue} onPreview={animated.onPreview} onCommit={animated.onCommit} keyframe={{ isActive: animated.isKeyframedAtTime, isDisabled: !isPlayheadWithinElementRange, onToggle: animated.toggleKeyframe }} />;
 }

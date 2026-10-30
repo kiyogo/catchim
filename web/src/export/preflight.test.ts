@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getMissingExportSources } from "./preflight";
+import { getMissingExportSources, getUnavailableExportEffects } from "./preflight";
 import type { SceneTracks } from "@/timeline";
 import type { MediaAsset } from "@/media/types";
 import { mediaTime } from "@/wasm";
@@ -50,6 +50,15 @@ const media = [
 	},
 ] as MediaAsset[];
 describe("export source preflight", () => {
+	it("blocks enabled unavailable effects without deleting their data, while respecting visibility and range", () => {
+		const scene = tracks();
+		const element = scene.main.elements[0];
+		element.effects = [{ id: "unknown", type: "missing-plugin", enabled: true, params: { strength: 0.3 } }];
+		expect(getUnavailableExportEffects({ tracks: scene, range, width: 1920, height: 1080 })).toEqual(["Missing video: missing-plugin"]);
+		expect(element.effects[0].params.strength).toBe(0.3);
+		element.effects[0].enabled = false;
+		expect(getUnavailableExportEffects({ tracks: scene, range, width: 1920, height: 1080 })).toEqual([]);
+	});
 	it("blocks missing sources intersecting the range and excludes outside sources", () => {
 		expect(
 			getMissingExportSources({

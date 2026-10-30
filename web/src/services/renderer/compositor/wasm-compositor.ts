@@ -90,8 +90,8 @@ class WasmCompositor {
 		}
 	}
 
-	render(frame: FrameDescriptor) {
-		renderFrame(frame);
+	render(frame: FrameDescriptor, targetTexture?: GPUTexture) {
+		renderFrame(frame, targetTexture);
 		if (isRenderPerfEnabled()) {
 			recordWasmFrameProfile(
 				getLastFrameProfile() as Array<{ name: string; durationMs: number }>,

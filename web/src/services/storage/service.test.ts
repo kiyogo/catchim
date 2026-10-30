@@ -8,6 +8,9 @@ import type { TProject } from "@/project/types";
 import { buildEmptyTrack } from "@/timeline/placement";
 import { floatToFrameRate } from "@/fps/utils";
 import { ZERO_MEDIA_TIME } from "@/wasm";
+import { buildTextElement } from "@/timeline/element-utils";
+import { mediaTimeFromSeconds } from "@/wasm";
+import type { GeneratedEffect } from "@/effects/generated-schema";
 
 const { metadataStores, fileStores } = vi.hoisted(() => ({
 	metadataStores: new Map<string, Map<string, unknown>>(),
@@ -184,7 +187,7 @@ describe("media asset persistence", () => {
 		expect(await storage.loadMediaAsset({projectId,id:original.id})).toMatchObject({binId:"voice-bin",tags:["voice","edited"],favorite:true});
 	});
 
-	test("preserves track lock state through project save and reopen", async () => {
+	test("preserves track locks, generated effect definitions, parameters and keyframes through project save and reopen", async () => {
 		const now = new Date("2026-10-22T00:00:00.000Z");
 		const project: TProject = {
 			metadata: {
@@ -222,9 +225,15 @@ describe("media asset persistence", () => {
 		};
 
 		const storage = new StorageService();
+		const text = buildTextElement({ raw: { duration: mediaTimeFromSeconds({ seconds: 5 }), params: { content: "Generated" } }, startTime: ZERO_MEDIA_TIME });
+		if (text.type !== "text") throw new Error("Expected text");
+		const generated: GeneratedEffect = { version: 1, id: "persisted", name: "Persisted", description: "Persistable recipe", createdBy: "ai", parameters: [{ key: "level", label: "Level", type: "number", default: 0, min: -1, max: 1, step: 0.01 }], nodes: [{ id: "grade", input: "source", effectType: "color-grading", bindings: { brightness: { parameter: "level" } } }], output: "grade" };
+		const key = { id: "key", time: mediaTimeFromSeconds({ seconds: 1 }), value: 0.75, segmentToNext: "linear" as const, tangentMode: "auto" as const };
+		project.scenes[0].tracks.overlay.push({ ...buildEmptyTrack({ id: "text", type: "text" }), elements: [{ ...text, id: "title", effects: [{ id: "generated", type: "generated:persisted", params: { level: 0.5 }, enabled: true, generated }], animations: { "effects.generated.params.level": { keys: [key] } } }] });
 		await storage.saveProject({ project });
 		const reopened = await storage.loadProject({ id: project.metadata.id });
 
 		expect(reopened?.project.scenes[0].tracks.main.locked).toBe(true);
+		expect(reopened?.project.scenes[0].tracks.overlay[0].elements[0]).toMatchObject({ effects: [{ generated, params: { level: 0.5 } }], animations: { "effects.generated.params.level": { keys: [key] } } });
 	});
 });

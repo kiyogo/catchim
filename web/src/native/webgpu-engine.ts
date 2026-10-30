@@ -607,6 +607,46 @@ class WebGpuEngine {
 		});
 	}
 
+	async readTexturePixels(texture: GPUTexture): Promise<Uint8Array> {
+		const device = this.state.device;
+		if (!device) throw new Error("WebGPU device not available");
+		if ((texture.format !== "rgba8unorm" && texture.format !== "bgra8unorm") ||
+			(texture.usage & GPUTextureUsage.COPY_SRC) === 0) {
+			throw new Error(`Texture format ${texture.format} cannot be read for video export`);
+		}
+
+		const width = texture.width;
+		const height = texture.height;
+		const bytesPerPixel = 4;
+		const bytesPerRow = Math.ceil((width * bytesPerPixel) / 256) * 256;
+		const buffer = device.createBuffer({
+			size: bytesPerRow * height,
+			usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+		});
+
+		try {
+			const encoder = device.createCommandEncoder();
+			encoder.copyTextureToBuffer(
+				{ texture },
+				{ buffer, bytesPerRow, rowsPerImage: height },
+				{ width, height },
+			);
+			device.queue.submit([encoder.finish()]);
+			await buffer.mapAsync(GPUMapMode.READ);
+
+			const padded = new Uint8Array(buffer.getMappedRange());
+			const pixels = new Uint8Array(width * height * bytesPerPixel);
+			const rowBytes = width * bytesPerPixel;
+			for (let row = 0; row < height; row++) {
+				pixels.set(padded.subarray(row * bytesPerRow, row * bytesPerRow + rowBytes), row * rowBytes);
+			}
+			return pixels;
+		} finally {
+			if (buffer.mapState === "mapped") buffer.unmap();
+			buffer.destroy();
+		}
+	}
+
 	releaseTexture(texture: GPUTexture): void {
 		if (this.texturePool.length >= this.maxPoolSize) {
 			const oldest = this.texturePool.shift();

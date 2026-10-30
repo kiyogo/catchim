@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useEditor } from "@/editor/use-editor";
 import { executeEditorTool } from "./editor-tools";
-import { AgentError, EDIT_PERMISSION, PREVIEW_PERMISSION } from "@/ai/contracts";
+import { McpEditError, EDIT_PERMISSION, PREVIEW_PERMISSION } from "@/mcp/edit-plan";
 import {
 	isEditorToolName,
 	toolDetails,
@@ -110,7 +110,7 @@ export function McpEditorBridge() {
 						} catch (error) {
 							result = {
 								ok: false,
-								code: error instanceof AgentError ? error.code : "EDITOR_ERROR",
+								code: error instanceof McpEditError ? error.code : "EDITOR_ERROR",
 								error: (error instanceof Error
 									? error.message
 									: "Editor operation failed"

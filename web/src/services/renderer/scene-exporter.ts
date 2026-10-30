@@ -6,6 +6,8 @@ import {
 	WebMOutputFormat,
 	BufferTarget,
 	CanvasSource,
+	VideoSample,
+	VideoSampleSource,
 	AudioBufferSource,
 	QUALITY_LOW,
 	QUALITY_MEDIUM,
@@ -122,11 +124,19 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 			target: new BufferTarget(),
 		});
 
-		const videoSource = new CanvasSource(this.renderer.getOutputCanvas(), {
+		const encodingConfig = {
 			codec: this.format === "webm" ? "vp9" : "avc",
 			bitrate: qualityMap[this.quality],
 			hardwareAcceleration: "prefer-hardware",
-		});
+		} as const;
+		// Do not sample the WebGPU swapchain canvas: some browsers expose its previously presented frame.
+		const useGpuReadback = this.renderer.getBackend() === "webgpu" && !!webGpuEngine.device;
+		const gpuPixelFormat = webGpuEngine.preferredFormat;
+		if (useGpuReadback && gpuPixelFormat !== "rgba8unorm" && gpuPixelFormat !== "bgra8unorm") {
+			throw new Error(`Không thể đọc frame WebGPU định dạng ${gpuPixelFormat} để xuất video`);
+		}
+		const gpuVideoSource = useGpuReadback ? new VideoSampleSource(encodingConfig) : null;
+		const videoSource = gpuVideoSource ?? new CanvasSource(this.renderer.getOutputCanvas(), encodingConfig);
 
 		output.addVideoTrack(videoSource, { frameRate: fpsFloat });
 
@@ -151,6 +161,15 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 			output.addAudioTrack(audioSource);
 		}
 
+		const exportTexture = useGpuReadback
+			? webGpuEngine.acquireTexture({
+				width: this.renderer.width,
+				height: this.renderer.height,
+				format: gpuPixelFormat,
+				usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
+			})
+			: null;
+
 		try {
 		await output.start();
 
@@ -168,18 +187,35 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 
 			const sample = getExportFrameSample(range.duration, fps, i);
 			if (!sample) throw new Error("Invalid export frame sample");
-			await this.renderer.render({ node: rootNode, time: range.start + sample.timeTicks });
+			await this.renderer.render({ node: rootNode, time: range.start + sample.timeTicks, targetTexture: exportTexture ?? undefined });
 			if ((globalThis as typeof globalThis & { __CATCHIM_BROWSER__?: boolean }).__CATCHIM_BROWSER__ &&
 				this.renderer.getBackend() !== "webgpu") {
 				throw new Error("WebGPU ngừng hoạt động trong lúc xuất video");
 			}
-			await webGpuEngine.device?.queue.onSubmittedWorkDone();
 			if (this.isCancelled) {
 				await output.cancel();
 				this.emit("cancelled");
 				return null;
 			}
-			await videoSource.add(sample.timestampSeconds, sample.durationSeconds);
+			if (exportTexture) {
+				if (!gpuVideoSource) throw new Error("Video export source mismatch");
+				const pixels = await webGpuEngine.readTexturePixels(exportTexture);
+				const videoSample = new VideoSample(pixels, {
+					format: gpuPixelFormat === "bgra8unorm" ? "BGRA" : "RGBA",
+					codedWidth: this.renderer.width,
+					codedHeight: this.renderer.height,
+					timestamp: sample.timestampSeconds,
+					duration: sample.durationSeconds,
+				});
+				try {
+					await gpuVideoSource.add(videoSample);
+				} finally {
+					videoSample.close();
+				}
+			} else {
+				if (!(videoSource instanceof CanvasSource)) throw new Error("Canvas video export source mismatch");
+				await videoSource.add(sample.timestampSeconds, sample.durationSeconds);
+			}
 
 			this.emit("progress", i / frameCount);
 		}
@@ -209,6 +245,8 @@ export class SceneExporter extends EventEmitter<SceneExporterEvents> {
 		} catch (error) {
 			await output.cancel().catch(() => {});
 			throw error;
+		} finally {
+			if (exportTexture) webGpuEngine.releaseTexture(exportTexture);
 		}
 	}
 }

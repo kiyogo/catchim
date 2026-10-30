@@ -7,6 +7,7 @@ pub mod animation;
 pub mod timeline;
 pub mod audio;
 pub mod effects;
+pub mod effect_graph;
 pub mod masks;
 pub mod compositor;
 pub mod canvas;

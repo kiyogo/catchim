@@ -75,7 +75,7 @@ export class CanvasRenderer {
 		this.context = surface.context;
 	}
 
-	async render({ node, time }: { node: AnyBaseNode; time: number }) {
+	async render({ node, time, targetTexture }: { node: AnyBaseNode; time: number; targetTexture?: GPUTexture }) {
 		if (this.disposed) return;
 		if (this.isPreview && exportOwnsCompositor) return;
 		if (this.isPreview) previewRenders++;
@@ -101,7 +101,7 @@ export class CanvasRenderer {
 		});
 		measureSpanSync({
 			name: "renderFrame",
-			fn: () => wasmCompositor.render(frame),
+			fn: () => wasmCompositor.render(frame, targetTexture),
 		});
 		if (this.isPreview) recordPreviewSubmission();
 		} finally {

@@ -6,6 +6,8 @@ import {
 	intensityToSigma,
 } from "@/effects/definitions/blur";
 import { effectsRegistry, resolveEffectPasses } from "@/effects";
+import { getEffectDefinition } from "@/effects/generated";
+import { initRustEngine } from "@/native/rust-engine";
 import type { Effect, EffectPass } from "@/effects/types";
 import { getSourceTimeAtClipTime } from "@/retime";
 import {
@@ -76,6 +78,7 @@ async function resolveNode({
 	node: AnyBaseNode;
 	context: ResolveContext;
 }): Promise<void> {
+	if (node.params && "effects" in node.params && Array.isArray(node.params.effects) && node.params.effects.some((effect: Effect) => effect.generated)) await initRustEngine();
 	if (node instanceof VideoNode) {
 		node.resolved = await resolveVideoNode({ node, context });
 	} else if (node instanceof ImageNode) {
@@ -119,7 +122,8 @@ function resolveEffectPassGroups({
 				animations,
 				localTime,
 			});
-			const definition = effectsRegistry.get(effect.type);
+			const definition = getEffectDefinition(effect);
+			if (!definition) return [];
 			return resolveEffectPasses({
 				definition,
 				effectParams: resolvedParams,

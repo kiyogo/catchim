@@ -557,7 +557,7 @@ function drawFrame2D(frame: any, ctx: CanvasRenderingContext2D | OffscreenCanvas
 	}
 }
 
-export function renderFrame(frame: any): void {
+export function renderFrame(frame: any, targetTexture?: GPUTexture): void {
 	if (!compositorCanvas) return;
 	const startTime = typeof performance !== "undefined" ? performance.now() : 0;
 	ensureCompositorContext();
@@ -572,7 +572,7 @@ export function renderFrame(frame: any): void {
 		if (blendTexture && (blendTexture.width !== frame.width || blendTexture.height !== frame.height)) { blendTexture.destroy(); blendTexture = null; }
 		if (!blendTexture) blendTexture = webGpuEngine.uploadImageToTexture(blendSurface);
 		else webGpuEngine.updateTextureFromImage(blendTexture, blendSurface, frame.width, frame.height);
-		if (blendTexture) webGpuEngine.renderFrameLayers({ context: compositorGpuContext, width: frame.width, height: frame.height, layers: [{ texture: blendTexture }] });
+		if (blendTexture) webGpuEngine.renderFrameLayers({ context: compositorGpuContext, targetTexture, width: frame.width, height: frame.height, layers: [{ texture: blendTexture }] });
 		lastFrameProfile = { renderTimeMs: performance.now() - startTime, layerCount: frame.items.length };
 		return;
 	}
@@ -668,6 +668,7 @@ export function renderFrame(frame: any): void {
 		try {
 			webGpuEngine.renderFrameLayers({
 				context: compositorGpuContext,
+				targetTexture,
 				width: compositorCanvas.width,
 				height: compositorCanvas.height,
 				clearColor,

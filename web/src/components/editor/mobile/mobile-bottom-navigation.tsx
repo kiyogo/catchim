@@ -15,6 +15,7 @@ import {
 	Type,
 	Smile,
 	Sparkles,
+	Link2,
 	Subtitles,
 	RectangleVertical,
 	Palette,
@@ -141,11 +142,11 @@ export function MobileBottomNavigation({
 		clearElementSelection();
 		onCloseSheet();
 	};
-	const agentButton = (
-		<button type="button" onClick={() => handleOpenAssetTab("agent")}
+	const mcpButton = (
+		<button type="button" onClick={() => handleOpenAssetTab("mcp")}
 			className="flex h-14 min-w-[4.15rem] flex-col items-center justify-center gap-1 rounded-lg px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-			aria-label={t("assets.agent")}>
-			<Sparkles className="size-5" /><span className="truncate max-w-full">{t("assets.agent")}</span>
+			aria-label={t("assets.mcp")}>
+			<Link2 className="size-5" /><span className="truncate max-w-full">{t("assets.mcp")}</span>
 		</button>
 	);
 
@@ -284,7 +285,7 @@ export function MobileBottomNavigation({
 						<Sliders className="size-5" />
 						<span className="truncate max-w-full">{t("mobile.properties")}</span>
 					</button>
-					{agentButton}
+					{mcpButton}
 				</div>
 			) : (
 				/* ============================================================ */
@@ -419,7 +420,7 @@ export function MobileBottomNavigation({
 						<Settings className="size-5" />
 						<span className="truncate max-w-full">{t("mobile.settings")}</span>
 					</button>
-					{agentButton}
+					{mcpButton}
 				</div>
 			)}
 		</nav>

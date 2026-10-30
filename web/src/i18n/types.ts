@@ -77,7 +77,8 @@ export interface LocaleMessages {
     selectFrameRate: string;
   };
   assets: {
-    agent: string;
+    effectUnavailable: string;
+    mcp: string;
     adjustment: string;
     adjustmentComingSoon: string;
     adjustmentSelectClip: string;

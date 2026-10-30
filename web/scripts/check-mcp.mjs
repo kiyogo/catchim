@@ -4,7 +4,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const origin = "http://localhost:3300";
+const origin = process.argv[2] ?? "http://localhost:3300";
+const base = new URL(origin);
+assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(base.hostname) && ["http:", "https:"].includes(base.protocol) && !base.username && !base.password && base.origin === origin, "Use a loopback origin without credentials or paths");
 const bridgeUrl = `${origin}/api/mcp/bridge`;
 const endpoint = `${origin}/api/mcp`;
 const create = await fetch(bridgeUrl, {
@@ -63,7 +65,7 @@ try {
 		}),
 	);
 	const listed = await client.listTools();
-	assert.equal(listed.tools.length, 22);
+	assert.equal(listed.tools.length, 25);
 	assert.equal(
 		(await client.callTool({ name: "catchim_get_project", arguments: {} }))
 			.structuredContent.synthetic,
@@ -78,7 +80,8 @@ try {
 		).isError,
 		true,
 	);
-	assert.equal((await client.listResources()).resources.length, 3);
+	assert.equal((await client.listResources()).resources.length, 5);
+	assert.equal((await client.listPrompts()).prompts.length, 2);
 	assert.equal(
 		JSON.parse(
 			(await client.readResource({ uri: "catchim://timeline" })).contents[0]
@@ -135,7 +138,8 @@ try {
 			cwd: process.cwd(),
 			env: { ...process.env, CATCHIM_MCP_URL: endpoint, CATCHIM_MCP_TOKEN: credentials.accessToken },
 		}));
-		assert.equal((await stdioClient.listTools()).tools.length, 22);
+		assert.equal((await stdioClient.listTools()).tools.length, 25);
+		assert.equal((await stdioClient.listPrompts()).prompts.length, 2);
 		assert.equal((await stdioClient.callTool({ name: "catchim_get_project", arguments: {} })).structuredContent.synthetic, true);
 	} finally { await stdioClient.close(); }
 } finally {
@@ -155,5 +159,5 @@ try {
 	);
 }
 console.log(
-	"MCP smoke PASS: HTTP + stdio, 22 tools, 3 resources, protocol negotiation, browser relay, permissions, token isolation and revocation. Synthetic connection only.",
+	"MCP smoke PASS: HTTP + stdio, 25 tools, 5 resources, 2 prompts, protocol negotiation, browser relay, permissions, token isolation and revocation. Synthetic connection only.",
 );

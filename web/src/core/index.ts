@@ -13,7 +13,7 @@ import { DiagnosticsManager } from "./managers/diagnostics-manager";
 import { registerDefaultEffects } from "@/effects";
 import { registerDefaultMasks } from "@/masks";
 import { registerTranscriptionDiagnostics } from "@/transcription/diagnostics";
-import { AgentManager } from "@/ai/manager";
+import { McpEditorRuntime } from "@/mcp/editor-runtime";
 
 export class EditorCore {
 	private static instance: EditorCore | null = null;
@@ -29,7 +29,7 @@ export class EditorCore {
 	public readonly selection: SelectionManager;
 	public readonly clipboard: ClipboardManager;
 	public readonly diagnostics: DiagnosticsManager;
-	public readonly agent: AgentManager;
+	public readonly mcp: McpEditorRuntime;
 
 	private constructor() {
 		registerDefaultEffects();
@@ -46,7 +46,7 @@ export class EditorCore {
 		this.selection = new SelectionManager(this);
 		this.clipboard = new ClipboardManager(this);
 		this.diagnostics = new DiagnosticsManager(this);
-		this.agent = new AgentManager(this);
+		this.mcp = new McpEditorRuntime(this);
 		registerTranscriptionDiagnostics({ diagnostics: this.diagnostics });
 		this.playback.bindTimelineScope();
 		this.command.registerReactor(() => {
@@ -58,8 +58,8 @@ export class EditorCore {
 			const tracks = activeScene.tracks;
 			const prunedTracks = {
 				...tracks,
-				overlay: tracks.overlay.filter((track) => track.elements.length > 0),
-				audio: tracks.audio.filter((track) => track.elements.length > 0),
+				overlay: tracks.overlay.filter((track) => track.elements.length > 0 || track.locked),
+				audio: tracks.audio.filter((track) => track.elements.length > 0 || track.locked),
 			};
 			if (
 				prunedTracks.overlay.length !== tracks.overlay.length ||

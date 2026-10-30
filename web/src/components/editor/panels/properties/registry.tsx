@@ -259,6 +259,7 @@ function getTextConfig({
 			buildTtsTab({ element }),
 			buildTransformTab({ element }),
 			buildBlendingTab({ element }),
+			...(element.effects?.length ? [buildClipEffectsTab({ element })] : []),
 		],
 	};
 }

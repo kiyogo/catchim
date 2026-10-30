@@ -3,7 +3,7 @@ import type { LocaleMessages } from "../types";
 export const en: LocaleMessages = {
   mcp: {
     description:
-      "Connect an AI assistant to read and edit this project through MCP.",
+      "Connect an MCP client to read and edit this project.",
     connected: "Connected",
     connecting: "Connecting…",
     disabled: "Disabled",
@@ -11,8 +11,8 @@ export const en: LocaleMessages = {
     enable: "Enable MCP",
     disable: "Disable",
     allowEdits: "Allow editing",
-    readOnly: "The assistant can only read project data.",
-    readWrite: "The assistant can edit using the shared undo history.",
+    readOnly: "The MCP client can only read project data.",
+    readWrite: "The MCP client can edit using the shared undo history.",
     endpoint: "MCP endpoint",
     token: "Access token",
     copyConfig: "Copy MCP config",
@@ -83,7 +83,8 @@ export const en: LocaleMessages = {
     selectFrameRate: "Select a frame rate",
   },
   assets: {
-    agent: "AI Agent",
+    effectUnavailable: "Effect unavailable. Its definition is preserved in this project.",
+    mcp: "MCP",
     adjustment: "Adjustment",
     adjustmentComingSoon: "Adjustment view coming soon...",
     adjustmentSelectClip: "Select a visual clip to adjust its color.",

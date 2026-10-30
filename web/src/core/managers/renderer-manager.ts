@@ -14,7 +14,8 @@ import { formatTimecode } from "opencut-wasm";
 import { downloadBlob } from "@/utils/browser";
 import { resolveExportRange } from "@/export/range";
 import { encodeAudioBufferWav } from "@/export/wav";
-import { getMissingExportSources } from "@/export/preflight";
+import { getMissingExportSources, getUnavailableExportEffects } from "@/export/preflight";
+import { initRustEngine } from "@/native/rust-engine";
 
 type SnapshotResult =
 	| { success: true; blob: Blob; filename: string }
@@ -196,6 +197,11 @@ export class RendererManager {
 				resolution,
 			});
 			const coordinateScale = canvasSize.height / sourceCanvasSize.height;
+			if (!audioOnly) {
+				if ([...tracks.overlay, tracks.main].some((t) => t.elements.some((e) => "effects" in e && e.effects?.some((effect) => effect.generated)))) await initRustEngine();
+				const unavailable = getUnavailableExportEffects({ tracks, range, ...canvasSize });
+				if (unavailable.length) return { success: false, error: `Effects unavailable or over resource budget: ${unavailable.join(", ")}. Restore dependencies, adjust settings or disable these effects before exporting.` };
+			}
 
 			let audioBuffer: AudioBuffer | null = null;
 			if (includeAudio || audioOnly) {
