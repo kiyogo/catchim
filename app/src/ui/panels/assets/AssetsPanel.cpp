@@ -402,19 +402,23 @@ void AssetsPanel::setupUi() {
     tabList_->setCurrentRow(0);
 
     viewsStack_ = new QStackedWidget(this);
-    // Give every assets tab the same outer side inset. Individual views keep
-    // their inner spacing, while their visible content now starts equally far
-    // from the left and right edges of the panel.
-    viewsStack_->setContentsMargins(12, 0, 12, 0);
-    viewsStack_->addWidget(createMediaView());
-    viewsStack_->addWidget(createAudioView());
-    viewsStack_->addWidget(createTextView());
-    viewsStack_->addWidget(createStickersView());
-    viewsStack_->addWidget(createEffectsView());
-    viewsStack_->addWidget(createTransitionsView());
-    viewsStack_->addWidget(createSubtitlesView());
-    viewsStack_->addWidget(createAdjustmentView());
-    viewsStack_->addWidget(createSettingsView());
+    viewsStack_->setContentsMargins(0, 0, 0, 0);
+    const auto addInsetView = [this](QWidget* page) {
+        const QMargins margins = page->contentsMargins();
+        page->setContentsMargins(12, margins.top(), 12, margins.bottom());
+        viewsStack_->addWidget(page);
+    };
+    // Apply the horizontal inset to each page itself so it stays consistent
+    // even when the stacked layout or a page's scroll area has its own gutter.
+    addInsetView(createMediaView());
+    addInsetView(createAudioView());
+    addInsetView(createTextView());
+    addInsetView(createStickersView());
+    addInsetView(createEffectsView());
+    addInsetView(createTransitionsView());
+    addInsetView(createSubtitlesView());
+    addInsetView(createAdjustmentView());
+    addInsetView(createSettingsView());
 
     connect(tabList_, &QListWidget::currentRowChanged, [this](int row) {
         viewsStack_->setCurrentIndex(row);
