@@ -7,6 +7,7 @@
 #include <QVBoxLayout>
 #include <functional>
 #include <map>
+#include <string>
 #include <vector>
 #include "editor/EditorEngine.h"
 #include "ui/icons/UiIcons.h"
@@ -35,6 +36,7 @@ private:
     std::map<editor::ClipType, QString> rememberedTabs_;
     std::vector<std::function<void(const editor::Clip&)>> readers_;
     QString activeTab_;
+    std::string selectedEffectId_;
     QString themeSignature_;
     QString visibleTabsSignature_;
     bool isUpdatingUi_{false};
