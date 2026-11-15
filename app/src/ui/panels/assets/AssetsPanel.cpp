@@ -7,6 +7,7 @@
 #include "ui/widgets/AssetTile.h"
 #include "ui/widgets/FlowLayout.h"
 #include "ui/widgets/PresetInsertion.h"
+#include "ui/widgets/BalancedScrollMargins.h"
 #include "editor/timeline/ElementUtils.h"
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -868,6 +869,7 @@ QWidget* AssetsPanel::createAudioView() {
     }
     sfxLayout->addStretch();
     sfxScroll->setWidget(sfxContainer);
+    balanceScrollContentMargins(sfxScroll);
     layout->addWidget(sfxScroll, 1);
     sfxScroll->hide();connect(localToggle,&QPushButton::toggled,sfxScroll,&QWidget::setVisible);
     layout->addStretch();
@@ -1267,6 +1269,7 @@ QWidget* AssetsPanel::createTransitionsView() {
     }
     cLayout->addStretch();
     scroll->setWidget(container);
+    balanceScrollContentMargins(scroll);
     cMainLayout->addWidget(scroll, 1);
     layout->addWidget(contentWidget, 1);
 
