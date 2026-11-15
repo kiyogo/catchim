@@ -31,6 +31,8 @@
 #include "ui/widgets/SidebarTooltipWidget.h"
 #include <QLabel>
 #include <QScrollArea>
+#include <QFrame>
+#include <QTimer>
 #include <QMargins>
 #include <QGroupBox>
 #include <QButtonGroup>
@@ -48,6 +50,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QUuid>
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
@@ -62,6 +65,8 @@
 #include <fstream>
 #include <sstream>
 #include <cmath>
+#include <algorithm>
+#include <memory>
 #ifdef _WIN32
 #include <objbase.h>
 #endif
@@ -802,13 +807,155 @@ QWidget* AssetsPanel::createAudioView() {
     auto* search=new QLineEdit(view);search->setObjectName("soundSearch");search->setPlaceholderText("Tìm kiếm…");search->setClearButtonEnabled(true);search->setFixedHeight(28);
     auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(0,0,0,0);searchRow->addWidget(search);layout->addLayout(searchRow);
     auto* tabs=new QWidget(view);auto* tabLayout=new QHBoxLayout(tabs);tabLayout->setContentsMargins(0,0,0,0);tabLayout->setSpacing(0);
-    auto* libraryTab=new QPushButton("Hiệu ứng âm thanh",tabs);auto* savedTab=new QPushButton("Đã lưu",tabs);
+    auto* libraryTab=new QPushButton("Hiệu ứng âm thanh",tabs);auto* savedTab=new QPushButton("Đã lưu",tabs);auto* voiceoverTab=new QPushButton("Thu âm",tabs);
     auto* tabGroup=new QButtonGroup(tabs);
-    for(auto* b:{libraryTab,savedTab}){b->setCheckable(true);b->setFixedHeight(36);b->setProperty("class","browseTab");tabGroup->addButton(b);tabLayout->addWidget(b);}
+    for(auto* b:{libraryTab,savedTab,voiceoverTab}){b->setCheckable(true);b->setFixedHeight(36);b->setProperty("class","browseTab");tabGroup->addButton(b);tabLayout->addWidget(b);}
     libraryTab->setChecked(true);tabLayout->addStretch();layout->addWidget(tabs);
     auto* notice=new QLabel("Thư viện âm thanh trực tuyến chưa được kết nối.",view);
     notice->setProperty("class","sectionCaption");notice->setWordWrap(true);notice->setContentsMargins(0,8,0,8);layout->addWidget(notice);
     auto* localToggle=new QPushButton("Âm thử tổng hợp trên máy  ⌄",view);localToggle->setCheckable(true);localToggle->setProperty("class","sectionToggle");localToggle->setFixedHeight(28);layout->addWidget(localToggle);
+
+    auto* voiceoverScroll=new QScrollArea(view);
+    voiceoverScroll->setWidgetResizable(true);
+    voiceoverScroll->setFrameShape(QFrame::NoFrame);
+    voiceoverScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    voiceoverScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto* voiceoverContainer=new QWidget(voiceoverScroll);
+    auto* voiceoverContainerLayout=new QVBoxLayout(voiceoverContainer);
+    voiceoverContainerLayout->setContentsMargins(0,0,0,8);
+    voiceoverContainerLayout->setSpacing(8);
+    auto* voiceoverCard=new QWidget(voiceoverContainer);
+    voiceoverCard->setProperty("class","cardWidget");
+    auto* voiceoverLayout=new QVBoxLayout(voiceoverCard);
+    voiceoverLayout->setContentsMargins(12,12,12,12);
+    voiceoverLayout->setSpacing(8);
+    auto* voiceoverTitle=new QLabel("Thu âm voiceover",voiceoverCard);
+    voiceoverTitle->setStyleSheet("font-size: 14px; font-weight: 600;");
+    voiceoverLayout->addWidget(voiceoverTitle);
+    auto* voiceoverStatus=new QLabel("Thu âm từ microphone và thêm bản ghi vào dòng thời gian.",voiceoverCard);
+    voiceoverStatus->setProperty("class","sectionCaption");
+    voiceoverStatus->setWordWrap(true);
+    voiceoverLayout->addWidget(voiceoverStatus);
+    auto* voiceoverElapsed=new QLabel("00:00",voiceoverCard);
+    voiceoverElapsed->setAlignment(Qt::AlignCenter);
+    voiceoverElapsed->setStyleSheet("font-size: 24px; font-family: monospace;");
+    voiceoverLayout->addWidget(voiceoverElapsed);
+    auto* voiceoverButton=new QPushButton("Bắt đầu thu âm",voiceoverCard);
+    voiceoverButton->setFixedHeight(34);
+    voiceoverButton->setProperty("class","primaryButton");
+    voiceoverLayout->addWidget(voiceoverButton);
+    auto* voiceoverPrivacy=new QLabel("Microphone chỉ được dùng sau khi bạn bấm bắt đầu.",voiceoverCard);
+    voiceoverPrivacy->setProperty("class","sectionCaption");
+    voiceoverPrivacy->setWordWrap(true);
+    voiceoverLayout->addWidget(voiceoverPrivacy);
+    voiceoverContainerLayout->addWidget(voiceoverCard);
+    voiceoverContainerLayout->addStretch();
+    voiceoverScroll->setWidget(voiceoverContainer);
+    balanceScrollContentMargins(voiceoverScroll);
+    layout->addWidget(voiceoverScroll,1);
+    voiceoverScroll->hide();
+
+    auto recordingStartedAt=std::make_shared<qint64>(0);
+    auto recordingClockStarted=std::make_shared<bool>(false);
+    auto recordingStartTime=std::make_shared<core::TimelineTime>(core::TimelineTime::fromSeconds(0));
+    auto recordingPath=std::make_shared<QString>();
+    auto* recordingTimer=new QTimer(voiceoverCard);
+    recordingTimer->setInterval(200);
+    connect(recordingTimer,&QTimer::timeout,voiceoverCard,[this,voiceoverStatus,voiceoverElapsed,voiceoverButton,recordingStartedAt,recordingClockStarted,recordingStartTime,recordingPath,recordingTimer]{
+#if defined(__EMSCRIPTEN__)
+        const int status=EM_ASM_INT({ return Module.catchimVoiceoverStatus || 0; });
+        if(status==2) {
+            if(!*recordingClockStarted) {
+                *recordingStartedAt=QDateTime::currentMSecsSinceEpoch();
+                *recordingClockStarted=true;
+            }
+            const qint64 elapsed=std::max<qint64>(0,QDateTime::currentMSecsSinceEpoch()-*recordingStartedAt);
+            voiceoverElapsed->setText(QString("%1:%2").arg(elapsed/60000,2,10,QChar('0')).arg((elapsed/1000)%60,2,10,QChar('0')));
+            voiceoverStatus->setText("Đang thu âm…");
+            voiceoverButton->setText("Dừng và thêm vào dòng thời gian");
+            voiceoverButton->setEnabled(true);
+            return;
+        }
+        if(status==1 || status==3) {
+            voiceoverStatus->setText(status==1?"Đang chờ quyền microphone…":"Đang lưu bản thu…");
+            voiceoverButton->setText("Vui lòng chờ…");
+            voiceoverButton->setEnabled(false);
+            return;
+        }
+        if(status==4) {
+            auto probed=media::MediaProbe::probe(recordingPath->toStdString());
+            if(!probed.ok()) {
+                voiceoverStatus->setText("Không thể đọc bản thu. Hãy thử lại.");
+            } else {
+                const auto detected=probed.unwrap();
+                const double duration=EM_ASM_DOUBLE({ return Module.catchimVoiceoverDuration || 0; });
+                auto asset=std::make_shared<media::MediaAsset>(detected->id(),detected->filePath(),media::MediaType::Audio);
+                asset->setFileSize(detected->fileSize());
+                asset->setDuration(core::TimelineTime::fromSeconds(duration>0.0?duration:detected->duration().toSeconds()));
+                asset->setHasAudio(true);
+                asset->setHasVideo(false);
+                mediaLibrary_.addAsset(asset);
+                editor::Clip clip(core::ClipId::generate(),editor::ClipType::Audio,asset->fileName(),*recordingStartTime,asset->duration());
+                initializeImportedClip(clip,*asset);
+                if(engine_.insertElement(std::move(clip),*recordingStartTime)) {
+                    engine_.project().setDirty(true);
+                    engine_.notifyTimelineChanged();
+                    refresh();
+                    voiceoverStatus->setText("Đã thêm bản thu vào dòng thời gian.");
+                } else {
+                    voiceoverStatus->setText("Đã lưu bản thu nhưng không thể thêm vào dòng thời gian.");
+                }
+            }
+            EM_ASM({ Module.catchimResetVoiceover(); });
+            *recordingClockStarted=false;
+            *recordingStartedAt=0;
+            voiceoverButton->setText("Bắt đầu thu âm");
+            voiceoverButton->setEnabled(true);
+            recordingTimer->stop();
+            return;
+        }
+        if(status==5) {
+            voiceoverStatus->setText("Không thể bắt đầu hoặc lưu bản thu. Kiểm tra quyền microphone rồi thử lại.");
+            EM_ASM({ Module.catchimResetVoiceover(); });
+            *recordingClockStarted=false;
+            *recordingStartedAt=0;
+            voiceoverButton->setText("Bắt đầu thu âm");
+            voiceoverButton->setEnabled(true);
+            recordingTimer->stop();
+        }
+#endif
+    });
+    connect(voiceoverButton,&QPushButton::clicked,voiceoverCard,[this,voiceoverButton,voiceoverStatus,voiceoverElapsed,recordingStartedAt,recordingClockStarted,recordingStartTime,recordingPath,recordingTimer]{
+#if defined(__EMSCRIPTEN__)
+        const int status=EM_ASM_INT({ return Module.catchimVoiceoverStatus || 0; });
+        if(status==2) {
+            voiceoverButton->setEnabled(false);
+            voiceoverButton->setText("Đang lưu bản thu…");
+            EM_ASM({ Module.catchimStopVoiceover(); });
+            return;
+        }
+        if(status==1 || status==3) return;
+        const QString directory=QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath("media/voiceovers");
+        if(!QDir().mkpath(directory)) {
+            voiceoverStatus->setText("Không thể tạo thư mục lưu voiceover.");
+            return;
+        }
+        *recordingPath=QDir(directory).filePath(QString("voiceover-%1.webm").arg(QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz")));
+        *recordingStartTime=engine_.playback().currentTime();
+        engine_.playback().pause();
+        *recordingClockStarted=false;
+        *recordingStartedAt=0;
+        voiceoverElapsed->setText("00:00");
+        voiceoverStatus->setText("Đang chờ quyền microphone…");
+        voiceoverButton->setEnabled(false);
+        const QByteArray pathUtf8=recordingPath->toUtf8();
+        EM_ASM({ Module.catchimStartVoiceover(UTF8ToString($0)); },pathUtf8.constData());
+        recordingTimer->start();
+#else
+        Q_UNUSED(this);
+        voiceoverStatus->setText("Thu âm voiceover chỉ dùng được trong phiên bản trình duyệt.");
+#endif
+    });
 
     auto* sfxScroll = new QScrollArea(view);
     sfxScroll->setWidgetResizable(true);
@@ -877,8 +1024,9 @@ QWidget* AssetsPanel::createAudioView() {
     sfxScroll->hide();connect(localToggle,&QPushButton::toggled,sfxScroll,&QWidget::setVisible);
     layout->addStretch();
     connect(search,&QLineEdit::textChanged,sfxContainer,[sfxContainer](const QString& query){for(auto* row:sfxContainer->findChildren<QWidget*>(QString(),Qt::FindDirectChildrenOnly))row->setVisible(row->property("searchName").toString().contains(query,Qt::CaseInsensitive));});
-    connect(savedTab,&QPushButton::clicked,view,[notice,sfxScroll,localToggle]{notice->setText("Chưa có âm thanh đã lưu.");sfxScroll->hide();localToggle->hide();});
-    connect(libraryTab,&QPushButton::clicked,view,[notice,localToggle,sfxScroll]{notice->setText("Thư viện âm thanh trực tuyến chưa được kết nối.");localToggle->show();sfxScroll->setVisible(localToggle->isChecked());});
+    connect(savedTab,&QPushButton::clicked,view,[search,notice,sfxScroll,localToggle,voiceoverScroll,recordingTimer]{search->show();notice->setText("Chưa có âm thanh đã lưu.");sfxScroll->hide();localToggle->hide();voiceoverScroll->hide();recordingTimer->stop();});
+    connect(libraryTab,&QPushButton::clicked,view,[search,notice,localToggle,sfxScroll,voiceoverScroll,recordingTimer]{search->show();notice->setText("Thư viện âm thanh trực tuyến chưa được kết nối.");localToggle->show();sfxScroll->setVisible(localToggle->isChecked());voiceoverScroll->hide();recordingTimer->stop();});
+    connect(voiceoverTab,&QPushButton::clicked,view,[search,notice,sfxScroll,localToggle,voiceoverScroll,recordingTimer]{search->hide();notice->hide();sfxScroll->hide();localToggle->hide();voiceoverScroll->show();recordingTimer->start();});
 
     return view;
 }

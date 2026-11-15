@@ -136,3 +136,96 @@
         // Preserve any reservations made after that reset was requested.
     };
 })();
+
+// Browser microphone capture for the Qt voiceover panel. The browser owns the
+// permission prompt and encoding; completed bytes are written to the existing
+// IndexedDB-backed Emscripten filesystem so C++ can probe/import them normally.
+Module.catchimVoiceoverStatus = 0;
+Module.catchimVoiceoverError = "";
+Module.catchimVoiceoverDuration = 0;
+Module.catchimVoiceoverStart = null;
+Module.catchimVoiceoverRecorder = null;
+Module.catchimVoiceoverStream = null;
+Module.catchimStartVoiceover = async function (outputPath) {
+    if (Module.catchimVoiceoverStatus === 1 || Module.catchimVoiceoverStatus === 2 || Module.catchimVoiceoverStatus === 3) return;
+    Module.catchimVoiceoverStatus = 1;
+    Module.catchimVoiceoverError = "";
+    Module.catchimVoiceoverDuration = 0;
+    try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined")
+            throw new Error("Microphone capture is unavailable in this browser.");
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true }
+        });
+        Module.catchimVoiceoverStream = stream;
+        const mimeType = ["audio/webm;codecs=opus", "audio/webm"].find(type => MediaRecorder.isTypeSupported(type));
+        const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+        const chunks = [];
+        recorder.addEventListener("dataavailable", event => {
+            if (event.data && event.data.size > 0) chunks.push(event.data);
+        });
+        recorder.addEventListener("stop", async () => {
+            Module.catchimVoiceoverStatus = 3;
+            try {
+                const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+                if (blob.size === 0) throw new Error("The recording is empty.");
+                const bytes = new Uint8Array(await blob.arrayBuffer());
+                FS.writeFile(outputPath, bytes);
+                Module.catchimVoiceoverDuration = Math.max(0, (performance.now() - Module.catchimVoiceoverStart) / 1000);
+                if (Module.catchimPersistNow) Module.catchimPersistNow();
+                Module.catchimVoiceoverStatus = 4;
+            } catch (error) {
+                Module.catchimVoiceoverError = String(error && error.message || error);
+                Module.catchimVoiceoverStatus = 5;
+            } finally {
+                if (Module.catchimVoiceoverStream) {
+                    Module.catchimVoiceoverStream.getTracks().forEach(track => track.stop());
+                    Module.catchimVoiceoverStream = null;
+                }
+                Module.catchimVoiceoverRecorder = null;
+            }
+        }, { once: true });
+        recorder.addEventListener("error", event => {
+            Module.catchimVoiceoverError = String(event.error && event.error.message || "Recording failed.");
+            Module.catchimVoiceoverStatus = 5;
+            if (Module.catchimVoiceoverStream) {
+                Module.catchimVoiceoverStream.getTracks().forEach(track => track.stop());
+                Module.catchimVoiceoverStream = null;
+            }
+            Module.catchimVoiceoverRecorder = null;
+        }, { once: true });
+        Module.catchimVoiceoverRecorder = recorder;
+        recorder.start(250);
+        Module.catchimVoiceoverStart = performance.now();
+        Module.catchimVoiceoverStatus = 2;
+    } catch (error) {
+        Module.catchimVoiceoverError = String(error && error.message || error);
+        if (Module.catchimVoiceoverStream) {
+            Module.catchimVoiceoverStream.getTracks().forEach(track => track.stop());
+            Module.catchimVoiceoverStream = null;
+        }
+        Module.catchimVoiceoverRecorder = null;
+        Module.catchimVoiceoverStatus = 5;
+    }
+};
+Module.catchimStopVoiceover = function () {
+    const recorder = Module.catchimVoiceoverRecorder;
+    if (recorder && recorder.state === "recording") {
+        Module.catchimVoiceoverStatus = 3;
+        recorder.stop();
+    }
+};
+Module.catchimResetVoiceover = function () {
+    if (Module.catchimVoiceoverRecorder && Module.catchimVoiceoverRecorder.state !== "inactive") {
+        try { Module.catchimVoiceoverRecorder.stop(); } catch (_) {}
+    }
+    if (Module.catchimVoiceoverStream) {
+        Module.catchimVoiceoverStream.getTracks().forEach(track => track.stop());
+        Module.catchimVoiceoverStream = null;
+    }
+    Module.catchimVoiceoverRecorder = null;
+    Module.catchimVoiceoverStart = null;
+    Module.catchimVoiceoverDuration = 0;
+    Module.catchimVoiceoverError = "";
+    Module.catchimVoiceoverStatus = 0;
+};
