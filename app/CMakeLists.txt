@@ -512,6 +512,8 @@ add_library(catchim_render STATIC
     src/render/FontRegistry.h
     src/render/effects/BlurEffect.cpp
     src/render/effects/BlurEffect.h
+    src/render/effects/ClipEffectRenderer.cpp
+    src/render/effects/ClipEffectRenderer.h
     src/render/effects/MaskFeatherEngine.cpp
     src/render/effects/MaskFeatherEngine.h
     src/render/graphics/GraphicGeometry.cpp

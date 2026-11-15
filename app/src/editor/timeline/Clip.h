@@ -46,7 +46,7 @@ inline ClipType stringToClipType(std::string_view sv) {
 struct MaskInstance {
     std::string id;
     std::string type{"freeform"};
-    nlohmann::json params{nlohmann::json::object()};
+    nlohmann::json params = nlohmann::json::object();
 
     bool operator==(const MaskInstance& other) const = default;
 };
@@ -54,7 +54,7 @@ struct MaskInstance {
 struct EffectInstance {
     std::string id;
     std::string type{"blur"};
-    nlohmann::json params{nlohmann::json::object()};
+    nlohmann::json params = nlohmann::json::object();
     bool enabled{true};
 
     bool operator==(const EffectInstance& other) const = default;
@@ -163,7 +163,7 @@ private:
     core::MediaId mediaId_{core::MediaId::empty()};
     bool hidden_{false};
     bool muted_{false};
-    nlohmann::json params_{nlohmann::json::object()};
+    nlohmann::json params_ = nlohmann::json::object();
     std::unordered_map<std::string, AnimationChannel> animationChannels_;
     std::vector<MaskInstance> masks_;
     std::vector<EffectInstance> effects_;

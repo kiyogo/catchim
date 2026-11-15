@@ -8,9 +8,13 @@
 #include "ui/widgets/FlowLayout.h"
 #include "ui/widgets/PresetInsertion.h"
 #include "ui/widgets/BalancedScrollMargins.h"
+#include "editor/history/commands/ElementCommands.h"
+#include "editor/history/commands/BatchCommand.h"
+#include "editor/history/commands/EffectCommands.h"
 #include "editor/timeline/ElementUtils.h"
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QMessageBox>
 #include <QRegularExpression>
 #include "media/probe/MediaProbe.h"
 #include "media/decoder/NativeVideoDecoder.h"
@@ -2289,20 +2293,78 @@ void AssetsPanel::onAddGraphicPreset(const QString& name, const QString& shapeTy
 
 void AssetsPanel::onApplyEffectPreset(const QString& effectName) {
     const auto& sel = engine_.selectedClips();
-    if (sel.empty()) return;
+    if (sel.empty()) {
+        QMessageBox::information(this,"Hiệu ứng","Hãy chọn clip video hoặc ảnh trên dòng thời gian trước.");
+        return;
+    }
 
     auto* tl = engine_.activeTimeline();
     if (!tl) return;
-
-    for (const auto& cid : sel) {
-        auto* clip = tl->findClip(cid);
-        if (clip) {
-            clip->setParam("effect.name", effectName.toStdString());
-            clip->setParam("effect.intensity", 1.0);
-        }
+    std::string effectType;
+    nlohmann::json defaultParams = nlohmann::json::object();
+    if (effectName == "Blur") {
+        effectType = "blur";
+        defaultParams["intensity"] = 15.0;
+    } else if (effectName == "Vignette") {
+        effectType = "vignette";
+        defaultParams["amount"] = 0.45;
+        defaultParams["softness"] = 0.55;
+    } else if (effectName == "Chroma key") {
+        effectType = "chroma-key";
+        defaultParams["keyColor"] = "#00FF00";
+        defaultParams["similarity"] = 0.4;
+        defaultParams["smoothness"] = 0.1;
+        defaultParams["spill"] = 0.1;
+    } else if (effectName == "Color grading") {
+        effectType = "color-grading";
+        defaultParams["brightness"] = 0.0;
+        defaultParams["contrast"] = 0.0;
+        defaultParams["saturation"] = 0.0;
+        defaultParams["exposure"] = 0.0;
+        defaultParams["temperature"] = 0.0;
+        defaultParams["tint"] = 0.0;
+        defaultParams["hue"] = 0.0;
+        defaultParams["gamma"] = 1.0;
+    } else if (effectName == "Sharpen") {
+        effectType = "sharpen";
+        defaultParams["amount"] = 0.35;
+    } else if (effectName == "Monochrome") {
+        effectType = "grayscale";
+        defaultParams["intensity"] = 1.0;
+    } else if (effectName == "Invert Colors") {
+        effectType = "invert";
+        defaultParams["intensity"] = 1.0;
+    } else {
+        return;
     }
+
+    auto batch = std::make_unique<editor::BatchCommand>("Apply Effect Preset");
+    size_t applicableCount = 0;
+    for(const auto& cid:sel) {
+        const auto* clip=tl->findClip(cid);
+        const auto* track = tl->findTrackContainingClip(cid);
+        if (!clip || !track ||
+            (clip->type()!=editor::ClipType::Video && clip->type()!=editor::ClipType::Image)) {
+            continue;
+        }
+        if (!clip->getParam<std::string>("effect.name", "").empty()) {
+            editor::ElementPatch clearLegacyEffect{};
+            clearLegacyEffect.clipId = cid;
+            clearLegacyEffect.patchParams["effect.name"] = "";
+            batch->addCommand(std::make_unique<editor::UpdateElementsCommand>(
+                *tl, std::vector<editor::ElementPatch>{std::move(clearLegacyEffect)}));
+        }
+        batch->addCommand(std::make_unique<editor::AddClipEffectCommand>(
+            *tl, track->id(), cid, effectType, defaultParams));
+        ++applicableCount;
+    }
+    if(applicableCount == 0) {
+        QMessageBox::information(this,"Hiệu ứng","Hiệu ứng chỉ áp dụng được cho clip video hoặc ảnh.");
+        return;
+    }
+    if(!engine_.history().execute(std::move(batch)))return;
     engine_.project().setDirty(true);
-    engine_.notifyProjectChanged();
+    engine_.notifyTimelineChanged();
 }
 
 void AssetsPanel::onApplyTransitionPreset(const QString& name, double durationSec) {

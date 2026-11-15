@@ -12,7 +12,7 @@ namespace catchim::editor {
 struct ElementPatch {
     core::TrackId trackId;
     core::ClipId clipId;
-    nlohmann::json patchParams{nlohmann::json::object()};
+    nlohmann::json patchParams = nlohmann::json::object();
     std::optional<bool> muted;
     std::optional<bool> hidden;
     std::optional<std::string> name;

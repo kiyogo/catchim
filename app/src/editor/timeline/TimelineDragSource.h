@@ -45,7 +45,7 @@ struct GraphicDragPayload {
     std::string id;
     std::string name{"Graphic"};
     std::string definitionId{""};
-    nlohmann::json params{nlohmann::json::object()};
+    nlohmann::json params = nlohmann::json::object();
 };
 
 struct EffectDragPayload {

@@ -22,7 +22,7 @@ struct VisualElementBounds {
     double height{100.0};
     double rotation{0.0}; // in degrees
     Transform initialTransform;
-    nlohmann::json initialParams{nlohmann::json::object()};
+    nlohmann::json initialParams = nlohmann::json::object();
 
     bool operator==(const VisualElementBounds& other) const {
         return trackId == other.trackId && clipId == other.clipId;

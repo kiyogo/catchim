@@ -1,4 +1,5 @@
 #include "RenderEngine.h"
+#include "render/effects/ClipEffectRenderer.h"
 #include "media/decoder/NativeVideoDecoder.h"
 #include "media/MediaLibrary.h"
 #include <algorithm>
@@ -358,6 +359,9 @@ const CompositorOutput& RenderEngine::renderFrame(
         if (!effName.empty()) {
             applyEffectToPixels(layer.rgbaPixels, layer.sourceWidth, layer.sourceHeight, effName, effIntensity);
         }
+
+        ClipEffectRenderer::apply(
+            layer.rgbaPixels, layer.sourceWidth, layer.sourceHeight, clip, time);
 
         compositor_.compositeLayer(layer);
     };

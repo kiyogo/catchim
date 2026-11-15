@@ -17,6 +17,7 @@
 #include "editor/history/commands/AudioSeparationCommands.h"
 #include "editor/clipboard/ClipboardManager.h"
 #include "render/Compositor.h"
+#include "render/effects/ClipEffectRenderer.h"
 #include "render/TextRasterizer.h"
 #include "render/MaskEngine.h"
 #include "audio/AudioResampler.h"
@@ -793,6 +794,46 @@ void runVisualEffectsTests() {
     TEST_ASSERT(blurBuf[adjIdx] > 0);
 
     std::cout << "[PASS] runVisualEffectsTests" << std::endl;
+}
+
+void runStructuredEffectStackRenderTests() {
+    using namespace catchim::core;
+    using namespace catchim::editor;
+
+    Clip clip(ClipId::generate(), ClipType::Video, "Stacked effects",
+              TimelineTime::fromSeconds(0.0), TimelineTime::fromSeconds(2.0));
+    EffectInstance grayscale;
+    grayscale.id = "effect-grayscale";
+    grayscale.type = "grayscale";
+    grayscale.params = {{"intensity", 1.0}};
+    clip.effects().push_back(grayscale);
+    EffectInstance invert;
+    invert.id = "effect-invert";
+    invert.type = "invert";
+    invert.params = {{"intensity", 1.0}};
+    clip.effects().push_back(invert);
+
+    std::vector<uint8_t> pixels{255, 0, 0, 255};
+    catchim::render::ClipEffectRenderer::apply(pixels, 1, 1, clip, TimelineTime::fromSeconds(0.0));
+    TEST_ASSERT(pixels[0] == 179 && pixels[1] == 179 && pixels[2] == 179 && pixels[3] == 255);
+
+    clip.effects().back().enabled = false;
+    pixels = {255, 0, 0, 255};
+    catchim::render::ClipEffectRenderer::apply(pixels, 1, 1, clip, TimelineTime::fromSeconds(0.0));
+    TEST_ASSERT(pixels[0] == 76 && pixels[1] == 76 && pixels[2] == 76 && pixels[3] == 255);
+
+    Clip keyed(ClipId::generate(), ClipType::Video, "Green screen",
+               TimelineTime::fromSeconds(0.0), TimelineTime::fromSeconds(2.0));
+    EffectInstance chroma;
+    chroma.id = "effect-chroma";
+    chroma.type = "chroma-key";
+    chroma.params = {{"keyColor", "#00FF00"}, {"similarity", 0.4}, {"smoothness", 0.1}, {"spill", 0.1}};
+    keyed.effects().push_back(chroma);
+    pixels = {0, 255, 0, 255};
+    catchim::render::ClipEffectRenderer::apply(pixels, 1, 1, keyed, TimelineTime::fromSeconds(0.0));
+    TEST_ASSERT(pixels[3] == 0);
+
+    std::cout << "[PASS] runStructuredEffectStackRenderTests" << std::endl;
 }
 
 void runTextRasterizerTests() {
@@ -13000,6 +13041,7 @@ int main() {
     runClipboardTests();
     runSceneManagementTests();
     runVisualEffectsTests();
+    runStructuredEffectStackRenderTests();
     runTextRasterizerTests();
     runAudioFadeAndRampingTests();
     runCropAndTransformTests();
