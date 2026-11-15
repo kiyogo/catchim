@@ -1607,7 +1607,56 @@ QWidget* AssetsPanel::createSubtitlesView() {
     importButton->setIcon(UiIcons::get(UiIcon::CloudUpload,Theme::instance().palette().textPrimary,16));
     importButton->setToolTip("Nhập tệp phụ đề");
     connect(importButton,&QPushButton::clicked,this,&AssetsPanel::onImportSrtClicked);
-    layout->addWidget(createPanelHeaderWidget(view,"Phụ đề",importButton));
+    auto* exportButton = new QPushButton("Xuất SRT",view); exportButton->setFixedSize(82,28);
+    exportButton->setToolTip("Xuất các clip văn bản của cảnh hiện tại thành phụ đề SRT");
+    connect(exportButton,&QPushButton::clicked,this,[this] {
+        const auto* scene = engine_.project().activeScene();
+        if (!scene) return;
+        struct Cue { core::TimelineTime start; core::TimelineTime end; std::string text; };
+        std::vector<Cue> cues;
+        for (const auto* track : scene->timeline().allTracks()) {
+            for (const auto& clip : track->clips()) {
+                if (clip.type() != editor::ClipType::Text) continue;
+                const auto text = clip.getParam<std::string>("text.content", clip.name());
+                if (!text.empty()) cues.push_back({clip.startTime(), clip.endTime(), text});
+            }
+        }
+        if (cues.empty()) {
+            QMessageBox::information(this,"Xuất SRT","Cảnh hiện tại chưa có clip văn bản để xuất.");
+            return;
+        }
+        std::sort(cues.begin(),cues.end(),[](const Cue& a,const Cue& b){return a.start<b.start;});
+        auto timestamp=[](core::TimelineTime time) {
+            const auto ms=static_cast<long long>(std::max<int64_t>(0,time.ticks())*1000/core::TICKS_PER_SECOND);
+            const auto h=ms/3600000, m=(ms/60000)%60, s=(ms/1000)%60, milli=ms%1000;
+            return QString("%1:%2:%3,%4").arg(h,2,10,QChar('0')).arg(m,2,10,QChar('0'))
+                .arg(s,2,10,QChar('0')).arg(milli,3,10,QChar('0'));
+        };
+        QByteArray srtData;
+        QTextStream out(&srtData, QIODevice::WriteOnly);
+        for (std::size_t i=0;i<cues.size();++i)
+            out << (i+1) << "\n" << timestamp(cues[i].start) << " --> " << timestamp(cues[i].end)
+                << "\n" << QString::fromStdString(cues[i].text) << "\n\n";
+        out.flush();
+#if defined(__EMSCRIPTEN__)
+        QFileDialog::saveFileContent(srtData,"captions.srt",this);
+#else
+        const auto path = QFileDialog::getSaveFileName(this,"Xuất phụ đề", "captions.srt", "SubRip (*.srt)");
+        if (path.isEmpty()) return;
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly|QIODevice::Text)) {
+            QMessageBox::warning(this,"Xuất SRT thất bại","Không thể ghi tệp đã chọn.");
+            return;
+        }
+        if (file.write(srtData) != srtData.size()) {
+            QMessageBox::warning(this,"Xuất SRT thất bại","Không thể ghi đầy đủ nội dung phụ đề.");
+        }
+#endif
+    });
+    auto* actions = new QWidget(view);
+    auto* actionLayout = new QHBoxLayout(actions); actionLayout->setContentsMargins(0,0,0,0); actionLayout->setSpacing(4);
+    actionLayout->addWidget(exportButton); actionLayout->addWidget(importButton);
+    layout->addWidget(createPanelHeaderWidget(view,"Phụ đề",actions));
     auto* content = new QWidget(view);
     auto* body = new QVBoxLayout(content); body->setContentsMargins(16,12,16,16); body->setSpacing(8);
     body->addWidget(new QLabel("Ngôn ngữ",content));
