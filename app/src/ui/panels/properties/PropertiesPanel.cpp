@@ -211,6 +211,8 @@ void PropertiesPanel::setupUi() {
     select(text,"Độ đậm","text.fontWeight",{"Bình thường","Đậm"},{"normal","bold"},"normal");
     select(text,"Kiểu chữ","text.fontStyle",{"Bình thường","Nghiêng"},{"normal","italic"},"normal");
     select(text,"Trang trí","text.textDecoration",{"Không","Gạch chân","Gạch ngang"},{"none","underline","line-through"},"none");
+    number(text,"Khoảng cách chữ","text.letterSpacing",0,-100,1000,.1,1.,true);
+    number(text,"Chiều cao dòng","text.lineHeight",1.2,.1,10,.1,1.,true);
     auto* tts=addTab("tts","Chuyển văn bản thành giọng nói",UiIcon::Audio);
     auto* ttsInfo=new QLabel("Chưa kết nối bộ tổng hợp giọng nói. Không tạo âm thanh giả thay lời đọc."); ttsInfo->setWordWrap(true);tts->addWidget(ttsInfo);
     auto* transform=addTab("transform","Biến đổi",UiIcon::Transform);

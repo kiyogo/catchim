@@ -70,14 +70,29 @@ private:
     }
 };
 
-static QSizeF webTextBounds(const editor::Clip& clip,int canvasW,int canvasH) {
+static QSizeF webTextBounds(const editor::Clip& clip,int canvasW,int canvasH,core::TimelineTime localTime) {
     QFont font(QString::fromStdString(clip.getParam<std::string>("text.fontFamily","Arial")));
     font.setPixelSize(std::max(1,qRound(clip.getParam<double>("text.fontSize",15)*canvasH/90.0)));
     font.setBold(clip.getParam<std::string>("text.fontWeight","normal")=="bold");
     font.setItalic(clip.getParam<std::string>("text.fontStyle","normal")=="italic");
+    const auto resolveTextNumber=[&](const char* key,const char* alias,double fallback) {
+        if(const auto* channel=clip.findAnimationChannel(key);channel&&!channel->empty())
+            return channel->getValueAt(localTime);
+        if(const auto* channel=clip.findAnimationChannel(alias);channel&&!channel->empty())
+            return channel->getValueAt(localTime);
+        return clip.getParam<double>(key,clip.getParam<double>(alias,fallback));
+    };
+    font.setLetterSpacing(QFont::AbsoluteSpacing,
+        resolveTextNumber("text.letterSpacing","letterSpacing",0.0));
     const QFontMetricsF metrics(font);
     const auto bounds=metrics.boundingRect(QRectF(40,0,canvasW-80,canvasH),Qt::AlignCenter|Qt::TextWordWrap,QString::fromStdString(clip.getParam<std::string>("text.content",clip.name())));
-    return bounds.size();
+    const bool hasLineHeight=clip.hasParam("text.lineHeight")||clip.hasParam("lineHeight")||
+        clip.findAnimationChannel("text.lineHeight")||clip.findAnimationChannel("lineHeight");
+    if(!hasLineHeight||metrics.height()<=0.0)return bounds.size();
+    const double lineHeightRatio=std::clamp(
+        resolveTextNumber("text.lineHeight","lineHeight",1.2),0.1,10.0);
+    const int lineCount=std::max(1,qRound(bounds.height()/metrics.height()));
+    return {bounds.width(),lineCount*font.pixelSize()*lineHeightRatio};
 }
 
 PreviewWidget::PreviewWidget(
@@ -145,7 +160,9 @@ PreviewWidget::SelectionGeometry PreviewWidget::selectionGeometry() const {
         source = QSizeF(asset->width(), asset->height());
     } else if (clip->type() == editor::ClipType::Text) {
         // Retain the native text layout's measured selection extent.
-        source = clip->getParam<bool>("text.webLayout",false) ? webTextBounds(*clip,cw,ch) : QSizeF(240,100);
+        source = clip->getParam<bool>("text.webLayout",false)
+            ? webTextBounds(*clip,cw,ch,engine_.playback().currentTime()-clip->startTime())
+            : QSizeF(240,100);
     } else if (clip->type() == editor::ClipType::Graphic) {
         const double size = std::min(output.width(),output.height())/4;
         const auto shape = clip->getParam<std::string>("graphic.shape","rectangle");

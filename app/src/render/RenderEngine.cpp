@@ -14,6 +14,9 @@
 #include <QRect>
 #include <QPolygon>
 #include <QPoint>
+#include <QTextOption>
+#include <QTextLayout>
+#include <QFontMetricsF>
 #endif
 
 namespace catchim::render {
@@ -255,6 +258,20 @@ const CompositorOutput& RenderEngine::renderFrame(
             double fontSize = clip.getParam<double>("text.fontSize", 44.0);
             std::string colorStr = clip.getParam<std::string>("text.color", "#FFFFFF");
             std::string style = clip.getParam<std::string>("text.style", "regular");
+            const auto resolveTextNumber=[&](const char* key,const char* alias,double fallback) {
+                if(const auto* channel=clip.findAnimationChannel(key);channel&&!channel->empty())
+                    return channel->getValueAt(localTime);
+                if(const auto* channel=clip.findAnimationChannel(alias);channel&&!channel->empty())
+                    return channel->getValueAt(localTime);
+                return clip.getParam<double>(key,clip.getParam<double>(alias,fallback));
+            };
+            const double letterSpacing=resolveTextNumber("text.letterSpacing","letterSpacing",0.0);
+            const double lineHeightRatio=std::clamp(
+                resolveTextNumber("text.lineHeight","lineHeight",1.2),0.1,10.0);
+            const bool customTextLayout=clip.hasParam("text.letterSpacing")||clip.hasParam("letterSpacing")||
+                clip.hasParam("text.lineHeight")||clip.hasParam("lineHeight")||
+                clip.findAnimationChannel("text.letterSpacing")||clip.findAnimationChannel("letterSpacing")||
+                clip.findAnimationChannel("text.lineHeight")||clip.findAnimationChannel("lineHeight");
 
             QImage img(layer.rgbaPixels.data(), layer.sourceWidth, layer.sourceHeight, layer.sourceWidth * 4, QImage::Format_RGBA8888);
             {
@@ -275,6 +292,7 @@ const CompositorOutput& RenderEngine::renderFrame(
                 font.setItalic(clip.getParam<std::string>("text.fontStyle","normal")=="italic");
                 font.setUnderline(clip.getParam<std::string>("text.textDecoration","none")=="underline");
                 font.setStrikeOut(clip.getParam<std::string>("text.textDecoration","none")=="line-through");
+                font.setLetterSpacing(QFont::AbsoluteSpacing,letterSpacing);
                 painter.setFont(font);
 
                 QColor textColor(QString::fromStdString(colorStr));
@@ -295,11 +313,45 @@ const CompositorOutput& RenderEngine::renderFrame(
                 const auto align=clip.getParam<std::string>("text.textAlign","center");
                 flags &= ~(Qt::AlignLeft | Qt::AlignRight | Qt::AlignHCenter);
                 flags |= align=="left"?Qt::AlignLeft:align=="right"?Qt::AlignRight:Qt::AlignHCenter;
-                painter.setPen(QColor(0, 0, 0, 220));
-                painter.drawText(rect.translated(2, 2), flags, QString::fromStdString(textContent));
+                if(customTextLayout) {
+                    const QString displayText=QString::fromStdString(textContent);
+                    QTextOption textOption;
+                    textOption.setAlignment(Qt::Alignment(flags)&(Qt::AlignLeft|Qt::AlignHCenter|Qt::AlignRight));
+                    textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+                    QTextLayout textLayout(displayText,font);
+                    textLayout.setTextOption(textOption);
+                    const QFontMetricsF fontMetrics(font);
+                    const double baseFontPixels=font.pixelSize()>0
+                        ?font.pixelSize():fontMetrics.height()/1.2;
+                    const qreal lineAdvance=std::max<qreal>(1.0,baseFontPixels*lineHeightRatio);
+                    int lineCount=0;
+                    textLayout.beginLayout();
+                    while(true) {
+                        auto line=textLayout.createLine();
+                        if(!line.isValid())break;
+                        line.setLineWidth(rect.width());
+                        line.setPosition(QPointF(0.0,lineCount*lineAdvance));
+                        ++lineCount;
+                    }
+                    textLayout.endLayout();
+                    const qreal blockHeight=lineCount*lineAdvance;
+                    qreal top=rect.top();
+                    if(flags&Qt::AlignBottom)top+=rect.height()-blockHeight;
+                    else if(flags&Qt::AlignVCenter)top+=(rect.height()-blockHeight)/2.0;
 
-                painter.setPen(textColor);
-                painter.drawText(rect, flags, QString::fromStdString(textContent));
+                    painter.save();
+                    painter.setClipRect(rect);
+                    painter.setPen(QColor(0,0,0,220));
+                    textLayout.draw(&painter,QPointF(rect.left()+2,top+2));
+                    painter.setPen(textColor);
+                    textLayout.draw(&painter,QPointF(rect.left(),top));
+                    painter.restore();
+                } else {
+                    painter.setPen(QColor(0, 0, 0, 220));
+                    painter.drawText(rect.translated(2, 2), flags, QString::fromStdString(textContent));
+                    painter.setPen(textColor);
+                    painter.drawText(rect, flags, QString::fromStdString(textContent));
+                }
             }
 #endif
             decoded = true;
