@@ -40,6 +40,9 @@
 #include <QSpinBox>
 #include <QPushButton>
 #include <QComboBox>
+#include <QSettings>
+#include <QSignalBlocker>
+#include <QSet>
 #include <QSlider>
 #include <QTextEdit>
 #include <QDragEnterEvent>
@@ -967,6 +970,26 @@ QWidget* AssetsPanel::createAudioView() {
     sfxLayout->setContentsMargins(0, 0, 0, 8);
     sfxLayout->setSpacing(6);
 
+    auto favoriteNames = std::make_shared<QSet<QString>>();
+#if !defined(__EMSCRIPTEN__)
+    for (const auto& name : QSettings().value("audio/savedLocalSfx").toStringList())
+        favoriteNames->insert(name);
+#endif
+    auto savedOnly = std::make_shared<bool>(false);
+    auto refreshSoundRows = [sfxContainer, search, notice, favoriteNames, savedOnly] {
+        const QString query = search->text().trimmed();
+        for (auto* row : sfxContainer->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
+            const QString name = row->property("searchName").toString();
+            row->setVisible((!*savedOnly || favoriteNames->contains(name)) &&
+                            name.contains(query, Qt::CaseInsensitive));
+        }
+        if (*savedOnly) {
+            notice->setText(favoriteNames->isEmpty()
+                ? "Chưa có âm thanh đã lưu. Nhấn biểu tượng dấu trang trên mẫu để lưu."
+                : QString("%1 âm thanh đã lưu trên thiết bị.").arg(favoriteNames->size()));
+        }
+    };
+
     struct SfxEntry {
         QString name;
         QString category;
@@ -985,6 +1008,18 @@ QWidget* AssetsPanel::createAudioView() {
         {"Fast Camera Shutter", "Foley", 0.6},
         {"Laser Swoosh", "Sci-Fi", 1.0}
     };
+
+#if defined(__EMSCRIPTEN__)
+    for (const auto& sfx : sfxList) {
+        const QByteArray nameUtf8 = sfx.name.toUtf8();
+        if (EM_ASM_INT({
+            try { return localStorage.getItem("catchim.savedLocalSfx:" + UTF8ToString($0)) === "1" ? 1 : 0; }
+            catch (_) { return 0; }
+        }, nameUtf8.constData())) {
+            favoriteNames->insert(sfx.name);
+        }
+    }
+#endif
 
     const auto& pal = Theme::instance().palette();
     for (const auto& sfx : sfxList) {
@@ -1005,6 +1040,59 @@ QWidget* AssetsPanel::createAudioView() {
         nameLabel->setWordWrap(true);
         rLayout->addWidget(nameLabel, 1);
 
+        auto* favoriteBtn = new QPushButton(row);
+        favoriteBtn->setCheckable(true);
+        favoriteBtn->setChecked(favoriteNames->contains(sfx.name));
+        favoriteBtn->setFixedSize(28, 28);
+        favoriteBtn->setIconSize(QSize(16, 16));
+        favoriteBtn->setFlat(true);
+        favoriteBtn->setAccessibleName(favoriteBtn->isChecked() ? "Bỏ lưu âm thanh" : "Lưu âm thanh");
+        favoriteBtn->setToolTip(favoriteBtn->accessibleName());
+        const QColor favoriteColor = pal.destructive;
+        const QColor defaultColor = pal.textSecondary;
+        auto updateFavoriteStyle = [favoriteBtn, favoriteColor, defaultColor] {
+            const bool saved = favoriteBtn->isChecked();
+            favoriteBtn->setIcon(UiIcons::get(UiIcon::Bookmark, saved ? favoriteColor : defaultColor, 16));
+            favoriteBtn->setAccessibleName(saved ? "Bỏ lưu âm thanh" : "Lưu âm thanh");
+            favoriteBtn->setToolTip(favoriteBtn->accessibleName());
+        };
+        updateFavoriteStyle();
+        connect(favoriteBtn, &QPushButton::toggled, row,
+                [favoriteBtn, favoriteNames, savedOnly, sfx, notice, refreshSoundRows, updateFavoriteStyle](bool saved) {
+#if defined(__EMSCRIPTEN__)
+            const QByteArray nameUtf8 = sfx.name.toUtf8();
+            const int persisted = EM_ASM_INT({
+                try {
+                    const key = "catchim.savedLocalSfx:" + UTF8ToString($0);
+                    if ($1) localStorage.setItem(key, "1");
+                    else localStorage.removeItem(key);
+                    return 1;
+                } catch (error) {
+                    console.warn("[Catchim] Could not save favorite audio:", error);
+                    return 0;
+                }
+            }, nameUtf8.constData(), saved ? 1 : 0);
+            if (!persisted) {
+                QSignalBlocker blocker(favoriteBtn);
+                favoriteBtn->setChecked(!saved);
+                updateFavoriteStyle();
+                notice->setText("Không thể lưu âm thanh yêu thích trong trình duyệt.");
+                return;
+            }
+#endif
+            if (saved) favoriteNames->insert(sfx.name);
+            else favoriteNames->remove(sfx.name);
+#if !defined(__EMSCRIPTEN__)
+            QStringList names;
+            for (const auto& name : *favoriteNames) names.push_back(name);
+            names.sort(Qt::CaseInsensitive);
+            QSettings().setValue("audio/savedLocalSfx", names);
+#endif
+            updateFavoriteStyle();
+            if (*savedOnly) refreshSoundRows();
+        });
+        rLayout->addWidget(favoriteBtn);
+
         auto* addBtn = new QPushButton("Thêm", row);
         addBtn->setToolTip(QString("Add %1 to timeline").arg(sfx.name));
         addBtn->setIcon(UiIcons::get(UiIcon::Plus, pal.textPrimary, 12));
@@ -1023,9 +1111,29 @@ QWidget* AssetsPanel::createAudioView() {
     layout->addWidget(sfxScroll, 1);
     sfxScroll->hide();connect(localToggle,&QPushButton::toggled,sfxScroll,&QWidget::setVisible);
     layout->addStretch();
-    connect(search,&QLineEdit::textChanged,sfxContainer,[sfxContainer](const QString& query){for(auto* row:sfxContainer->findChildren<QWidget*>(QString(),Qt::FindDirectChildrenOnly))row->setVisible(row->property("searchName").toString().contains(query,Qt::CaseInsensitive));});
-    connect(savedTab,&QPushButton::clicked,view,[search,notice,sfxScroll,localToggle,voiceoverScroll,recordingTimer]{search->show();notice->setText("Chưa có âm thanh đã lưu.");sfxScroll->hide();localToggle->hide();voiceoverScroll->hide();recordingTimer->stop();});
-    connect(libraryTab,&QPushButton::clicked,view,[search,notice,localToggle,sfxScroll,voiceoverScroll,recordingTimer]{search->show();notice->setText("Thư viện âm thanh trực tuyến chưa được kết nối.");localToggle->show();sfxScroll->setVisible(localToggle->isChecked());voiceoverScroll->hide();recordingTimer->stop();});
+    refreshSoundRows();
+    connect(search, &QLineEdit::textChanged, sfxContainer, [refreshSoundRows] { refreshSoundRows(); });
+    connect(savedTab, &QPushButton::clicked, view,
+            [search, sfxScroll, localToggle, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows] {
+        search->show();
+        *savedOnly = true;
+        refreshSoundRows();
+        sfxScroll->show();
+        localToggle->hide();
+        voiceoverScroll->hide();
+        recordingTimer->stop();
+    });
+    connect(libraryTab, &QPushButton::clicked, view,
+            [search, notice, localToggle, sfxScroll, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows] {
+        search->show();
+        *savedOnly = false;
+        notice->setText("Thư viện âm thanh trực tuyến chưa được kết nối.");
+        refreshSoundRows();
+        localToggle->show();
+        sfxScroll->setVisible(localToggle->isChecked());
+        voiceoverScroll->hide();
+        recordingTimer->stop();
+    });
     connect(voiceoverTab,&QPushButton::clicked,view,[search,notice,sfxScroll,localToggle,voiceoverScroll,recordingTimer]{search->hide();notice->hide();sfxScroll->hide();localToggle->hide();voiceoverScroll->show();recordingTimer->start();});
 
     return view;
