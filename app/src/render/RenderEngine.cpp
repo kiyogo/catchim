@@ -152,6 +152,28 @@ const CompositorOutput& RenderEngine::renderFrame(
         layer.transform.scaleY = clip.getParam<double>("transform.scaleY", 1.0);
         layer.transform.rotate = clip.getParam<double>("transform.rotate", 0.0);
         layer.transform.opacity = clip.getParam<double>("opacity", 1.0);
+        const auto transitionType = clip.getParam<std::string>("transition.type", "");
+        const double transitionDuration = std::clamp(
+            clip.getParam<double>("transition.duration", 0.0), 0.0, clip.duration().toSeconds());
+        const bool fadeIn = transitionType == "Fade In" || transitionType == "Fade In/Out";
+        const bool fadeOut = transitionType == "Fade Out" || transitionType == "Fade In/Out";
+        if (transitionDuration > 0.0 && (fadeIn || fadeOut)) {
+            const double fadeLength = transitionType == "Fade In/Out"
+                ? std::min(transitionDuration, clip.duration().toSeconds() * 0.5)
+                : transitionDuration;
+            if (fadeLength > 0.0) {
+                double opacity = 1.0;
+                if (fadeIn) {
+                    const double elapsed = (time - clip.startTime()).toSeconds();
+                    opacity = std::min(opacity, std::clamp(elapsed / fadeLength, 0.0, 1.0));
+                }
+                if (fadeOut) {
+                    const double remaining = (clip.endTime() - time).toSeconds();
+                    opacity = std::min(opacity, std::clamp(remaining / fadeLength, 0.0, 1.0));
+                }
+                layer.transform.opacity *= opacity;
+            }
+        }
 
         // Extract blendMode (supports int index or string name)
         static const char* s_blendModes[] = {"normal", "multiply", "screen", "overlay", "darken", "lighten", "color_dodge"};

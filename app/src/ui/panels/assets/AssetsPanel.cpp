@@ -7,6 +7,7 @@
 #include "ui/widgets/AssetTile.h"
 #include "ui/widgets/FlowLayout.h"
 #include "ui/widgets/PresetInsertion.h"
+#include "editor/timeline/ElementUtils.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -1189,8 +1190,7 @@ QWidget* AssetsPanel::createTransitionsView() {
     auto* layout = new QVBoxLayout(view);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto* notice=new QLabel("Chế độ chuyển cảnh sắp ra mắt…",view);notice->setProperty("class","sectionCaption");notice->setContentsMargins(12,12,12,8);notice->setWordWrap(true);layout->addWidget(notice);
-    auto* extrasToggle=new QPushButton("Công cụ desktop  ⌄",view);extrasToggle->setProperty("class","sectionToggle");extrasToggle->setCheckable(true);extrasToggle->setFixedHeight(28);layout->addWidget(extrasToggle);
+    auto* notice=new QLabel("Fade vào/ra áp dụng trực tiếp lên clip đã chọn.",view);notice->setProperty("class","sectionCaption");notice->setContentsMargins(12,12,12,8);notice->setWordWrap(true);layout->addWidget(notice);
 
     auto* contentWidget = new QWidget(view);
     auto* cMainLayout = new QVBoxLayout(contentWidget);
@@ -1214,10 +1214,15 @@ QWidget* AssetsPanel::createTransitionsView() {
 
     auto* scroll = new QScrollArea(contentWidget);
     scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Keep the short preset list flush with the duration control above. The
+    // hidden vertical bar remains wheel-scrollable on short viewports and
+    // cannot create a one-sided inset on the right edge.
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* container = new QWidget(scroll);
     auto* cLayout = new QVBoxLayout(container);
-    cLayout->setContentsMargins(0, 0, 4, 0);
+    cLayout->setContentsMargins(0, 0, 0, 0);
     cLayout->setSpacing(6);
 
     struct TransitionItem {
@@ -1227,16 +1232,9 @@ QWidget* AssetsPanel::createTransitionsView() {
     };
 
     std::vector<TransitionItem> transList = {
-        {"Cross Dissolve", "Smooth cross dissolve between scenes", UiIcon::Transitions},
-        {"Fade to Black", "Fade out to black then transition", UiIcon::Contrast},
-        {"Fade to White", "Flash fade to white into new scene", UiIcon::Sun},
-        {"Slide Left", "Smooth slide transition to the left", UiIcon::StepForward},
-        {"Slide Right", "Smooth slide transition to the right", UiIcon::StepBack},
-        {"Slide Up", "Slide new scene upwards from bottom", UiIcon::Transitions},
-        {"Slide Down", "Slide new scene downwards from top", UiIcon::Transitions},
-        {"Zoom In", "Zoom into the next scene", UiIcon::ZoomIn},
-        {"Zoom Out", "Zoom out transition into new scene", UiIcon::ZoomOut},
-        {"Wipe", "Clean horizontal wipe transition", UiIcon::Sliders}
+        {"Fade In", "Làm clip hiện dần từ trong suốt", UiIcon::Transitions},
+        {"Fade Out", "Làm clip mờ dần trước khi kết thúc", UiIcon::Contrast},
+        {"Fade In/Out", "Làm clip hiện dần ở đầu và mờ dần ở cuối", UiIcon::Transitions}
     };
 
     const auto& tPal = Theme::instance().palette();
@@ -1271,8 +1269,6 @@ QWidget* AssetsPanel::createTransitionsView() {
     scroll->setWidget(container);
     cMainLayout->addWidget(scroll, 1);
     layout->addWidget(contentWidget, 1);
-    contentWidget->hide();connect(extrasToggle,&QPushButton::toggled,contentWidget,&QWidget::setVisible);
-    layout->addStretch();
 
     return view;
 }
@@ -2041,20 +2037,29 @@ void AssetsPanel::onApplyEffectPreset(const QString& effectName) {
 
 void AssetsPanel::onApplyTransitionPreset(const QString& name, double durationSec) {
     const auto& sel = engine_.selectedClips();
-    if (sel.empty()) return;
+    if (sel.empty()) {
+        QMessageBox::information(this,"Chuyển cảnh","Hãy chọn phần tử hình ảnh trên dòng thời gian trước.");
+        return;
+    }
 
     auto* tl = engine_.activeTimeline();
     if (!tl) return;
-
+    std::vector<editor::ElementPatch> updates;
     for (const auto& cid : sel) {
-        auto* clip = tl->findClip(cid);
-        if (clip) {
-            clip->setParam("transition.type", name.toStdString());
-            clip->setParam("transition.duration", durationSec);
-        }
+        const auto* clip = tl->findClip(cid);
+        if (!clip || !editor::ElementUtils::isVisualElement(*clip)) continue;
+        editor::ElementPatch update{};update.clipId=cid;
+        update.patchParams["transition.type"]=name.toStdString();
+        update.patchParams["transition.duration"]=durationSec;
+        updates.push_back(std::move(update));
     }
+    if(updates.empty()) {
+        QMessageBox::information(this,"Chuyển cảnh","Fade chỉ áp dụng được cho clip hình ảnh, văn bản, sticker hoặc đồ họa.");
+        return;
+    }
+    if(!engine_.history().execute(std::make_unique<editor::UpdateElementsCommand>(*tl,std::move(updates))))return;
     engine_.project().setDirty(true);
-    engine_.notifyProjectChanged();
+    engine_.notifyTimelineChanged();
 }
 
 void AssetsPanel::onApplyAdjustment(double brightness, double contrast, double saturation, double temperature, double tint) {
