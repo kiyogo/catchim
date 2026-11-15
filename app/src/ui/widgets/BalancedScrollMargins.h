@@ -19,8 +19,23 @@ inline QMargins balancedViewportMargins(
 
     const QRect areaRect = area->contentsRect();
     const QRect viewportRect = area->viewport()->geometry();
-    const int leftGutter = qMax(0, viewportRect.left() - areaRect.left());
-    const int rightGutter = qMax(0, areaRect.right() - viewportRect.right());
+    int leftGutter = qMax(0, viewportRect.left() - areaRect.left());
+    int rightGutter = qMax(0, areaRect.right() - viewportRect.right());
+
+    // Some Qt styles place scrollbars over the viewport instead of shrinking
+    // it. In that case the viewport geometry alone misses the visible gutter,
+    // leaving every row a scrollbar-width closer to the right edge. Include
+    // the scrollbar's actual geometry when it overlaps the viewport.
+    if (const auto* scrollBar = area->verticalScrollBar(); scrollBar && scrollBar->isVisible()) {
+        const QRect scrollBarRect = scrollBar->geometry();
+        if (scrollBarRect.intersects(viewportRect)) {
+            if (scrollBarRect.center().x() < areaRect.center().x()) {
+                leftGutter = qMax(leftGutter, scrollBarRect.right() - areaRect.left() + 1);
+            } else {
+                rightGutter = qMax(rightGutter, areaRect.right() - scrollBarRect.left() + 1);
+            }
+        }
+    }
     const int equalOuterMargin = qMax(
         baseMargins.left() + leftGutter,
         baseMargins.right() + rightGutter);
@@ -77,6 +92,7 @@ protected:
     bool eventFilter(QObject*, QEvent* event) override {
         switch (event->type()) {
         case QEvent::Resize:
+        case QEvent::Move:
         case QEvent::Show:
         case QEvent::Hide:
         case QEvent::ShowToParent:
