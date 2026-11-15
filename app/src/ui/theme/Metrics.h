@@ -6,7 +6,7 @@ struct Metrics {
     // Logical pixel geometry of the supplied 1912x938 editor reference.
     static constexpr int headerHeight = 53;
     static constexpr int editorMarginLeft = 6;
-    static constexpr int editorMarginRight = 10;
+    static constexpr int editorMarginRight = editorMarginLeft;
     static constexpr int editorMarginBottom = 6;
     static constexpr int splitterGap = 8;
     static constexpr int panelBorderRadius = 6;          // 0.35rem

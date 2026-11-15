@@ -34,7 +34,7 @@ EditorHeader::EditorHeader(editor::EditorEngine& engine, QWidget* parent)
 
 void EditorHeader::setupUi() {
     auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(6, 2, 12, 0);
+    layout->setContentsMargins(6, 2, 6, 0);
     layout->setSpacing(4);
 
     // Left side: Logo & Project Name
