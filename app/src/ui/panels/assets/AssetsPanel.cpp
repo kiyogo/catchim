@@ -31,6 +31,7 @@
 #include "ui/widgets/SidebarTooltipWidget.h"
 #include <QLabel>
 #include <QScrollArea>
+#include <QMargins>
 #include <QGroupBox>
 #include <QButtonGroup>
 #include <QDialogButtonBox>
@@ -784,6 +785,8 @@ QWidget* AssetsPanel::createMediaView() {
     });
     cLayout->addWidget(mediaListWidget_);
 
+    const QMargins mediaBaseMargins(8, 8, 8, 8);
+    balanceViewportLayoutMargins(mediaListWidget_, cLayout, mediaBaseMargins);
     layout->addWidget(contentArea, 1);
 
     return view;
@@ -1034,6 +1037,7 @@ QWidget* AssetsPanel::createTextView() {
 
     cLayout->addStretch();
     scroll->setWidget(container);
+    balanceScrollContentMargins(scroll);
     layout->addWidget(scroll, 1);
 
     return view;
@@ -1103,7 +1107,11 @@ QWidget* AssetsPanel::createStickersView() {
             }
             column->addWidget(shapeContainer);
         }
-        column->addStretch();auto* previous=scroll->takeWidget();scroll->setWidget(content);if(previous)previous->deleteLater();
+        column->addStretch();
+        auto* previous=scroll->takeWidget();
+        scroll->setWidget(content);
+        balanceScrollContentMargins(scroll);
+        if(previous)previous->deleteLater();
     };
     connect(search,&QLineEdit::textChanged,this,[rebuild]{rebuild();});
     connect(group,&QButtonGroup::idClicked,this,[rebuild]{rebuild();});
@@ -1180,6 +1188,7 @@ QWidget* AssetsPanel::createEffectsView() {
     }
     cLayout->addStretch();
     scroll->setWidget(container);
+    balanceScrollContentMargins(scroll);
     layout->addWidget(scroll, 1);
     scroll->hide();connect(extrasToggle,&QPushButton::toggled,scroll,&QWidget::setVisible);
     layout->addStretch();
@@ -1415,6 +1424,7 @@ QWidget* AssetsPanel::createAdjustmentView() {
 
     cLayout->addStretch();
     scroll->setWidget(container);
+    balanceScrollContentMargins(scroll);
     layout->addWidget(scroll, 1);
     scroll->hide();connect(extrasToggle,&QPushButton::toggled,scroll,&QWidget::setVisible);
     layout->addStretch();
@@ -1624,6 +1634,7 @@ QWidget* AssetsPanel::createSettingsView() {
     cLayout->addWidget(pages);
 
     scroll->setWidget(container);
+    balanceScrollContentMargins(scroll);
     layout->addWidget(scroll, 1);
 
     return view;

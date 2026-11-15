@@ -2,6 +2,7 @@
 #if defined(HAVE_QT6)
 #include "ui/theme/Theme.h"
 #include "ui/widgets/WebComboBox.h"
+#include "ui/widgets/BalancedScrollMargins.h"
 #include "editor/history/commands/ElementCommands.h"
 #include <QHBoxLayout>
 #include <QDoubleSpinBox>
@@ -82,7 +83,9 @@ void PropertiesPanel::setupUi() {
     scrollArea_->setStyleSheet("QScrollArea{border:none;background:transparent;}");
     scrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     auto* content=new QWidget;content->setObjectName("propertyContent"); auto* pages=new QVBoxLayout(content); pages->setContentsMargins(0,0,0,0); pages->setSpacing(0); pages->setAlignment(Qt::AlignTop);
-    scrollArea_->setWidget(content); row->addWidget(scrollArea_,1); root->addWidget(inspectorView_,1);
+    scrollArea_->setWidget(content);
+    balanceScrollContentMargins(scrollArea_);
+    row->addWidget(scrollArea_,1); root->addWidget(inspectorView_,1);
     content->setStyleSheet(QString("QDoubleSpinBox,QLineEdit,QTextEdit{background:%1;border:1px solid transparent;border-radius:10px;padding:4px 10px;min-width:0px;} QDoubleSpinBox:focus,QLineEdit:focus,QTextEdit:focus{border-color:%2;}").arg(pal.hover.name(),pal.primaryAccent.name()));
     auto field=[&](QVBoxLayout* layout,const QString& label,QWidget* control) {
         auto* wrapper=new QWidget;auto* fields=new QVBoxLayout(wrapper);fields->setContentsMargins(0,0,0,0);fields->setSpacing(8);
