@@ -2309,6 +2309,7 @@ void AssetsPanel::onApplyEffectPreset(const QString& effectName) {
         effectType = "vignette";
         defaultParams["amount"] = 0.45;
         defaultParams["softness"] = 0.55;
+        defaultParams["roundness"] = 1.0;
     } else if (effectName == "Chroma key") {
         effectType = "chroma-key";
         defaultParams["keyColor"] = "#00FF00";

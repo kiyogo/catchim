@@ -79,7 +79,8 @@ void applyEffect(
         const double amount = std::clamp(
             readEffectNumber(params, "amount", readEffectNumber(params, "intensity", 0.45)), 0.0, 1.0);
         const double softness = std::clamp(readEffectNumber(params, "softness", 0.55), 0.01, 1.0);
-        Compositor::applyVignette(pixels.data(), width, height, amount, softness);
+        const double roundness = std::clamp(readEffectNumber(params, "roundness", 1.0), 0.0, 1.0);
+        Compositor::applyVignette(pixels.data(), width, height, amount, softness, roundness);
         return;
     }
 

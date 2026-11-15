@@ -216,37 +216,35 @@ void Compositor::applyColorGrading(
     }
 }
 
-inline float smoothstep(float edge0, float edge1, float x) {
-    float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
-
 void Compositor::applyVignette(
     uint8_t* pixels,
     int32_t w,
     int32_t h,
     double amount,
-    double softness
+    double softness,
+    double roundness
 ) {
-    if (!pixels || w <= 0 || h <= 0 || amount <= 0.001) return;
+    if (!pixels || w <= 0 || h <= 0 || !std::isfinite(amount) || amount <= 0.001) return;
 
-    float cx = w / 2.0f;
-    float cy = h / 2.0f;
-    float maxDist = std::sqrt(cx * cx + cy * cy);
-    float amt = static_cast<float>(amount);
-    float soft = std::max(0.01f, static_cast<float>(softness));
+    const double cx = static_cast<double>(w) * 0.5;
+    const double cy = static_cast<double>(h) * 0.5;
+    const double maxDist = std::max(std::sqrt(cx * cx + cy * cy), 1.0);
+    const double amt = std::clamp(amount, 0.0, 1.0);
+    const double soft = std::clamp(std::isfinite(softness) ? softness : 0.55, 0.01, 1.0);
+    const double round = std::clamp(std::isfinite(roundness) ? roundness : 1.0, 0.0, 1.0);
 
     for (int32_t y = 0; y < h; ++y) {
-        float dy = y - cy;
+        const double dy = (static_cast<double>(y) - cy) * (1.0 + (1.0 - round));
         for (int32_t x = 0; x < w; ++x) {
-            float dx = x - cx;
-            float dist = std::sqrt(dx * dx + dy * dy) / maxDist;
-            float factor = std::clamp(1.0f - smoothstep(1.0f - soft, 1.0f, dist) * amt, 0.0f, 1.0f);
+            const double dx = static_cast<double>(x) - cx;
+            const double dist = std::sqrt(dx * dx + dy * dy) / maxDist;
+            const double falloff = std::clamp((dist - (1.0 - soft)) / soft, 0.0, 1.0);
+            const double factor = 1.0 - falloff * amt;
 
             size_t idx = (y * w + x) * 4;
-            pixels[idx + 0] = static_cast<uint8_t>(pixels[idx + 0] * factor);
-            pixels[idx + 1] = static_cast<uint8_t>(pixels[idx + 1] * factor);
-            pixels[idx + 2] = static_cast<uint8_t>(pixels[idx + 2] * factor);
+            pixels[idx + 0] = static_cast<uint8_t>(std::lround(pixels[idx + 0] * factor));
+            pixels[idx + 1] = static_cast<uint8_t>(std::lround(pixels[idx + 1] * factor));
+            pixels[idx + 2] = static_cast<uint8_t>(std::lround(pixels[idx + 2] * factor));
         }
     }
 }

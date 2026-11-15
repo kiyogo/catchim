@@ -52,7 +52,8 @@ public:
         int32_t w,
         int32_t h,
         double amount,
-        double softness
+        double softness,
+        double roundness = 1.0
     );
 
     static void applyGaussianBlur(

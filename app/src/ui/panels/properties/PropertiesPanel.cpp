@@ -268,6 +268,18 @@ void PropertiesPanel::setupUi() {
         const bool isColorGrading=effectName.contains("color grading",Qt::CaseInsensitive);
         for(auto* row:colorGradeRows)row->setVisible(isColorGrading);
     });
+    auto* vignetteAmount=number(effects,"Độ tối viền","effect.amount",0.45,0,1,0.01);bindEffectNumber(vignetteAmount,"amount",0.45);
+    vignetteAmount->setObjectName("property_effect_vignette_amount");
+    auto* vignetteSoftness=number(effects,"Độ mềm","effect.softness",0.55,0.01,1,0.01);bindEffectNumber(vignetteSoftness,"softness",0.55);
+    auto* vignetteRoundness=number(effects,"Độ tròn","effect.roundness",1.0,0,1,0.01);bindEffectNumber(vignetteRoundness,"roundness",1.0);
+    const std::vector<QWidget*> vignetteRows{
+        vignetteAmount->parentWidget(),vignetteSoftness->parentWidget(),vignetteRoundness->parentWidget()};
+    readers_.push_back([this,vignetteRows](const editor::Clip& c){
+        const auto* selected=selectedEffect(c,selectedEffectId_);
+        const auto effectName=selected?effectDisplayName(selected->type):QString::fromStdString(c.getParam<std::string>("effect.name",""));
+        const bool isVignette=effectName.compare("Vignette",Qt::CaseInsensitive)==0;
+        for(auto* row:vignetteRows)row->setVisible(isVignette);
+    });
     auto* keyColor=color(effects,"Màu cần xóa","effect.keyColor","#00FF00");bindEffectColor(keyColor,"keyColor","#00FF00");
     auto* keyColorRow=keyColor->parentWidget();
     auto* similarity=number(effects,"Độ tương đồng","effect.similarity",0.4,0.01,1.0,0.01);bindEffectNumber(similarity,"similarity",0.4);

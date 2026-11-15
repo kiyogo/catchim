@@ -833,6 +833,21 @@ void runStructuredEffectStackRenderTests() {
     catchim::render::ClipEffectRenderer::apply(pixels, 1, 1, keyed, TimelineTime::fromSeconds(0.0));
     TEST_ASSERT(pixels[3] == 0);
 
+    Clip vignette(ClipId::generate(), ClipType::Video, "Rounded vignette",
+                  TimelineTime::fromSeconds(0.0), TimelineTime::fromSeconds(2.0));
+    EffectInstance vignetteEffect;
+    vignetteEffect.id = "effect-vignette";
+    vignetteEffect.type = "vignette";
+    vignetteEffect.params = {{"amount", 1.0}, {"softness", 0.2}, {"roundness", 1.0}};
+    vignette.effects().push_back(vignetteEffect);
+    pixels.assign(5 * 5 * 4, 255);
+    catchim::render::ClipEffectRenderer::apply(pixels, 5, 5, vignette, TimelineTime::fromSeconds(0.0));
+    TEST_ASSERT(pixels[(0 * 5 + 2) * 4] > 250);
+    vignette.effects().front().params["roundness"] = 0.0;
+    pixels.assign(5 * 5 * 4, 255);
+    catchim::render::ClipEffectRenderer::apply(pixels, 5, 5, vignette, TimelineTime::fromSeconds(0.0));
+    TEST_ASSERT(pixels[(0 * 5 + 2) * 4] < 5);
+
     std::cout << "[PASS] runStructuredEffectStackRenderTests" << std::endl;
 }
 
