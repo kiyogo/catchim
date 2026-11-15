@@ -1,4 +1,6 @@
 #include "ElementCommands.h"
+#include "editor/timeline/TimelineElementUpdatePipeline.h"
+#include <utility>
 
 namespace catchim::editor {
 
@@ -70,8 +72,20 @@ bool UpdateElementsCommand::execute() {
         if (entry.name) clip->setName(*entry.name);
 
         if (entry.patchParams.is_object()) {
-            for (const auto& [key, value] : entry.patchParams.items()) {
-                clip->params()[key] = value;
+            const auto speed = entry.patchParams.find("speed");
+            const bool retimeClip = speed != entry.patchParams.end() && speed->is_number() &&
+                TimelineElementUpdatePipeline::isRetimableType(clip->type());
+            if (retimeClip) {
+                ElementUpdatePatch update;
+                update.retimeRate = speed->get<double>();
+                auto params = entry.patchParams;
+                params.erase("speed");
+                if (!params.empty()) update.params = std::move(params);
+                *clip = TimelineElementUpdatePipeline::applyElementUpdate(*clip, update, {});
+            } else {
+                for (const auto& [key, value] : entry.patchParams.items()) {
+                    clip->params()[key] = value;
+                }
             }
         }
     }

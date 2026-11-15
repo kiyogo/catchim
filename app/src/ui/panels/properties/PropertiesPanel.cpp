@@ -227,7 +227,7 @@ void PropertiesPanel::setupUi() {
     readers_.push_back([mute](const editor::Clip& c){QSignalBlocker guard(mute);mute->setChecked(c.isMuted()||c.getParam<bool>("muted",false));});
     connect(mute,&QCheckBox::toggled,this,[this](bool v){patch({{"muted",v}},v);});
     auto* speed=addTab("speed","Tốc độ",UiIcon::Speed);
-    number(speed,"Tốc độ phát","speed",1,.1,10,.1);
+    number(speed,"Tốc độ phát","speed",1,.01,5,.01);
     auto* reverse=new ToggleSwitch(content); field(speed,"Phát ngược",reverse);
     readers_.push_back([reverse](const editor::Clip& c){QSignalBlocker guard(reverse);reverse->setChecked(c.getParam<bool>("reversed",false));});
     connect(reverse,&QCheckBox::toggled,this,[this](bool v){patch({{"reversed",v}});});
