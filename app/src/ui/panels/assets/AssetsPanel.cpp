@@ -2047,14 +2047,15 @@ void AssetsPanel::onApplyTransitionPreset(const QString& name, double durationSe
     std::vector<editor::ElementPatch> updates;
     for (const auto& cid : sel) {
         const auto* clip = tl->findClip(cid);
-        if (!clip || !editor::ElementUtils::isVisualElement(*clip)) continue;
+        if (!clip || (!editor::ElementUtils::isVisualElement(*clip) &&
+                      !editor::ElementUtils::canElementHaveAudio(*clip))) continue;
         editor::ElementPatch update{};update.clipId=cid;
         update.patchParams["transition.type"]=name.toStdString();
         update.patchParams["transition.duration"]=durationSec;
         updates.push_back(std::move(update));
     }
     if(updates.empty()) {
-        QMessageBox::information(this,"Chuyển cảnh","Fade chỉ áp dụng được cho clip hình ảnh, văn bản, sticker hoặc đồ họa.");
+        QMessageBox::information(this,"Chuyển cảnh","Fade chỉ áp dụng được cho clip hình ảnh, âm thanh, văn bản, sticker hoặc đồ họa.");
         return;
     }
     if(!engine_.history().execute(std::make_unique<editor::UpdateElementsCommand>(*tl,std::move(updates))))return;

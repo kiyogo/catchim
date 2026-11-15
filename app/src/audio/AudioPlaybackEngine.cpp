@@ -110,6 +110,26 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
             bool reversed = clip.getParam<bool>("reversed", false);
             double fadeIn = clip.getParam<double>("audio.fadeIn", 0.0);
             double fadeOut = clip.getParam<double>("audio.fadeOut", 0.0);
+            const auto transitionType = clip.getParam<std::string>("transition.type", "");
+            const double transitionDuration = std::clamp(
+                clip.getParam<double>("transition.duration", 0.0), 0.0, clip.duration().toSeconds());
+            const bool transitionFadeIn = transitionType == "Fade In" || transitionType == "Fade In/Out";
+            const bool transitionFadeOut = transitionType == "Fade Out" || transitionType == "Fade In/Out";
+            const double transitionFadeLength = transitionType == "Fade In/Out"
+                ? std::min(transitionDuration, clip.duration().toSeconds() * 0.5)
+                : transitionDuration;
+            const auto transitionFadeAt = [&](double localSec) {
+                if (transitionFadeLength <= 0.0) return 1.0;
+                double factor = 1.0;
+                if (transitionFadeIn) {
+                    factor = std::min(factor, std::clamp(localSec / transitionFadeLength, 0.0, 1.0));
+                }
+                if (transitionFadeOut) {
+                    const double remaining = clip.duration().toSeconds() - localSec;
+                    factor = std::min(factor, std::clamp(remaining / transitionFadeLength, 0.0, 1.0));
+                }
+                return factor;
+            };
 
             // Try decoding real audio if media library & mediaId are present
             bool renderedRealAudio = false;
@@ -145,6 +165,7 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
                                 }
                             }
 
+                            fadeFactor *= transitionFadeAt(localSec);
                             double effectiveGain = gain * fadeFactor;
                             size_t srcFrameIdx = static_cast<size_t>(sourceSec * sampleRate);
                             if (srcFrameIdx < totalSourceFrames) {
@@ -162,9 +183,10 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
             if (!renderedRealAudio && !mediaLibrary) {
                 for (size_t i = 0; i < overlapFrames && (frameOffsetInSlice + i) < numFrames; ++i) {
                     size_t frameIdx = frameOffsetInSlice + i;
+                    const double localSec = (overlapStart - clipStart).toSeconds() + static_cast<double>(i) / sampleRate;
                     double t = (overlapStart.toSeconds() + static_cast<double>(i) / sampleRate);
                     // Blended signal proportional to gain
-                    float sample = static_cast<float>(std::sin(2.0 * 3.1415926535 * 440.0 * t) * 0.2 * gain);
+                    float sample = static_cast<float>(std::sin(2.0 * 3.1415926535 * 440.0 * t) * 0.2 * gain * transitionFadeAt(localSec));
 
                     outSamples[frameIdx * 2 + 0] += sample;
                     outSamples[frameIdx * 2 + 1] += sample;
