@@ -396,6 +396,10 @@ void AssetsPanel::setupUi() {
     tabList_->setCurrentRow(0);
 
     viewsStack_ = new QStackedWidget(this);
+    // Give every assets tab the same outer side inset. Individual views keep
+    // their inner spacing, while their visible content now starts equally far
+    // from the left and right edges of the panel.
+    viewsStack_->setContentsMargins(12, 0, 12, 0);
     viewsStack_->addWidget(createMediaView());
     viewsStack_->addWidget(createAudioView());
     viewsStack_->addWidget(createTextView());
