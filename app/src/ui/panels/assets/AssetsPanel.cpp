@@ -11,6 +11,7 @@
 #include "editor/history/commands/ElementCommands.h"
 #include "editor/history/commands/BatchCommand.h"
 #include "editor/history/commands/EffectCommands.h"
+#include "editor/history/commands/MediaCommands.h"
 #include "editor/timeline/ElementUtils.h"
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -30,6 +31,9 @@
 #include <QGridLayout>
 #include <QFormLayout>
 #include <QFileDialog>
+#include <QFile>
+#include <QTextStream>
+#include <QMessageBox>
 #include <QColorDialog>
 #include "ui/widgets/ColorPickerDialog.h"
 #include "ui/widgets/SidebarTooltipWidget.h"
@@ -533,6 +537,12 @@ void AssetsPanel::applySort() {
         else if(asset->type()!=media::MediaType::Audio)requestThumbnail(asset);
 
         item->setText(QString::fromStdString(asset->fileName()));
+        std::error_code sourceStatus;
+        const bool sourceMissing = !std::filesystem::is_regular_file(asset->filePath(), sourceStatus);
+        if (sourceMissing) {
+            item->setForeground(pal.destructive);
+            item->setToolTip("Tệp nguồn không tìm thấy. Bấm chuột phải để liên kết lại.");
+        }
         item->setData(Qt::UserRole, QString::fromStdString(asset->id().str()));
         item->setData(Qt::UserRole+1,QString::fromStdWString(asset->filePath().wstring()));
         item->setData(Qt::UserRole+2,QString::fromStdString(durStr));
@@ -788,9 +798,54 @@ QWidget* AssetsPanel::createMediaView() {
         menu->addAction(UiIcons::get(UiIcon::Media, pal.textPrimary, 14), "Add as New Layer", [this, assetId]() {
             onAddMediaAsNewLayer(assetId);
         });
+        menu->addAction(UiIcons::get(UiIcon::Media, pal.textPrimary, 14), "Relink / Replace Source File…", [this, assetId]() {
+            const QString filter = "All Media Files (*.mp4 *.mov *.mkv *.avi *.mp3 *.wav *.png *.jpg *.jpeg *.webp *.m4v *.wmv *.flv *.aac *.m4a *.flac *.ogg *.bmp);;All Files (*.*)";
+#if defined(__EMSCRIPTEN__)
+            QPointer<AssetsPanel> target(this);
+            QFileDialog::getOpenFileContent(filter, [target, assetId](const QString& fileName, const QByteArray& content) {
+                if (!target || fileName.isEmpty() || content.isEmpty()) return;
+                const QString mediaDir = QDir::homePath() + QStringLiteral("/.catchim/media");
+                if (!QDir().mkpath(mediaDir)) {
+                    QMessageBox::warning(target, "Không thể liên kết media", "Không thể tạo thư mục lưu tệp media.");
+                    return;
+                }
+                const QString storedName = QUuid::createUuid().toString(QUuid::WithoutBraces)
+                    + QLatin1Char('_') + QFileInfo(fileName).fileName();
+                const QString storedPath = QDir(mediaDir).filePath(storedName);
+                QFile storedFile(storedPath);
+                if (!storedFile.open(QIODevice::WriteOnly) || storedFile.write(content) != content.size()) {
+                    storedFile.remove();
+                    QMessageBox::warning(target, "Không thể liên kết media", "Không thể lưu tệp media đã chọn.");
+                    return;
+                }
+                storedFile.close();
+
+                auto probe = media::MediaProbe::probe(storedPath.toStdString());
+                if (!probe.ok() || !target->applyMediaReplacement(assetId, probe.ok() ? probe.unwrap() : nullptr)) {
+                    QFile::remove(storedPath);
+                    EM_ASM({ if (Module.catchimPersistNow) Module.catchimPersistNow(); });
+                    if (!probe.ok()) {
+                        QMessageBox::warning(target, "Không thể liên kết media", "Không thể đọc tệp media đã chọn.");
+                    }
+                    return;
+                }
+                EM_ASM({ if (Module.catchimPersistNow) Module.catchimPersistNow(); });
+            }, this);
+#else
+            const QString path = QFileDialog::getOpenFileName(this, "Relink / Replace Media Source", "", filter);
+            if (path.isEmpty()) return;
+            auto probe = media::MediaProbe::probe(path.toStdString());
+            if (!probe.ok()) {
+                QMessageBox::warning(this, "Không thể liên kết media", "Không thể đọc tệp media đã chọn.");
+                return;
+            }
+            applyMediaReplacement(assetId, probe.unwrap());
+#endif
+        });
         menu->addSeparator();
         menu->addAction(UiIcons::get(UiIcon::Delete, pal.destructive, 14), "Delete from Project", [this, assetId]() {
             mediaLibrary_.removeAsset(assetId);
+            engine_.project().setDirty(true);
             refresh();
         });
         menu->popup(mediaListWidget_->mapToGlobal(pos));
@@ -2001,6 +2056,7 @@ void AssetsPanel::dropEvent(QDropEvent* event) {
     }
 
     if (addedAny) {
+        engine_.project().setDirty(true);
         refresh();
         event->acceptProposedAction();
     } else {
@@ -2028,7 +2084,9 @@ void AssetsPanel::onImportClicked() {
         auto probeRes = media::MediaProbe::probe(path.toStdString());
         if (!probeRes.ok()) return;
         auto asset = probeRes.unwrap();
+        asset->setDisplayName(safeName.toStdString());
         target->mediaLibrary_.addAsset(asset);
+        target->engine_.project().setDirty(true);
 
         auto* tl = target->engine_.activeTimeline();
         if (tl && tl->mainTrack().clips().empty()) {
@@ -2053,6 +2111,7 @@ void AssetsPanel::onImportClicked() {
         if (probeRes.ok()) {
             auto asset = probeRes.unwrap();
             mediaLibrary_.addAsset(asset);
+            engine_.project().setDirty(true);
 
             // Auto add to main track if project is empty
             auto* tl = engine_.activeTimeline();
@@ -2078,6 +2137,36 @@ void AssetsPanel::onMediaItemDoubleClicked(QListWidgetItem* item) {
     if (!item) return;
     std::string assetIdStr = item->data(Qt::UserRole).toString().toStdString();
     onAddMediaToTimeline(core::MediaId(assetIdStr));
+}
+
+bool AssetsPanel::applyMediaReplacement(
+    const core::MediaId& id,
+    std::shared_ptr<media::MediaAsset> replacement) {
+    const auto current = mediaLibrary_.findAsset(id);
+    if (!current || !replacement) return false;
+    if (current->type() != replacement->type()) {
+        QMessageBox::warning(this, "Không thể liên kết media", "Tệp thay thế phải cùng loại với media gốc.");
+        return false;
+    }
+    const auto currentDuration = current->duration().ticks();
+    const auto replacementDuration = replacement->duration().ticks();
+    if (replacementDuration < currentDuration && currentDuration - replacementDuration > 1) {
+        QMessageBox::warning(this, "Không thể liên kết media", "Tệp thay thế phải có thời lượng bằng hoặc dài hơn media gốc.");
+        return false;
+    }
+
+    if (!engine_.history().execute(std::make_unique<editor::UpdateMediaAssetPathCommand>(
+            mediaLibrary_, id, std::move(replacement)))) {
+        QMessageBox::warning(this, "Không thể liên kết media", "Không thể cập nhật nguồn media.");
+        return false;
+    }
+
+    const auto assetKey = QString::fromStdString(id.str());
+    mediaThumbnails_.remove(assetKey);
+    pendingThumbnails_.remove(assetKey);
+    engine_.project().setDirty(true);
+    engine_.notifyProjectChanged();
+    return true;
 }
 
 void AssetsPanel::onAddMediaToTimeline(const core::MediaId& id) {

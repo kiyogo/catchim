@@ -3,6 +3,7 @@
 #include "ProjectSettings.h"
 #include "editor/timeline/Timeline.h"
 #include "core/ids/Ids.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <memory>
@@ -23,6 +24,26 @@ struct TimelineViewState {
     double zoomLevel{1.0};
     double scrollLeft{0.0};
     core::TimelineTime playheadTime{core::TimelineTime(0)};
+};
+
+// The project stores stable source references so the media library can be
+// reconstructed after opening a saved project. Paths are UTF-8 generic paths.
+struct ProjectMediaReference {
+    std::string id;
+    std::string path;
+    std::string displayName;
+    std::string type;
+    uint64_t fileSize{0};
+    int64_t durationTicks{0};
+    int32_t width{0};
+    int32_t height{0};
+    int32_t fpsNumerator{30};
+    int32_t fpsDenominator{1};
+    bool hasAudio{false};
+    bool hasVideo{false};
+    int32_t sampleRate{44100};
+    int32_t channels{2};
+    std::string codec;
 };
 
 class Scene {
@@ -80,6 +101,9 @@ public:
 
     int version() const noexcept { return version_; }
 
+    const std::vector<ProjectMediaReference>& mediaAssets() const noexcept { return mediaAssets_; }
+    std::vector<ProjectMediaReference>& mediaAssets() noexcept { return mediaAssets_; }
+
     // Scenes
     const std::vector<Scene>& scenes() const noexcept { return scenes_; }
     std::vector<Scene>& scenes() noexcept { return scenes_; }
@@ -115,6 +139,7 @@ private:
     ProjectMetadata metadata_;
     ProjectSettings settings_;
     int version_{31};
+    std::vector<ProjectMediaReference> mediaAssets_;
     std::vector<Scene> scenes_;
     core::SceneId currentSceneId_;
     TimelineViewState viewState_;

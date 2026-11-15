@@ -167,14 +167,42 @@ UpdateMediaAssetPathCommand::UpdateMediaAssetPathCommand(
 {
 }
 
+UpdateMediaAssetPathCommand::UpdateMediaAssetPathCommand(
+    media::MediaLibrary& library,
+    core::MediaId assetId,
+    std::shared_ptr<media::MediaAsset> replacementAsset
+)
+    : library_(library)
+    , assetId_(std::move(assetId))
+    , newPath_(replacementAsset ? replacementAsset->filePath() : std::filesystem::path{})
+    , replacementAsset_(std::move(replacementAsset))
+{
+}
+
 bool UpdateMediaAssetPathCommand::execute() {
     auto asset = library_.findAsset(assetId_);
-    if (!asset) {
+    if (!asset || (replacementAsset_ && asset->type() != replacementAsset_->type())) {
         return false;
     }
 
     previousPath_ = asset->filePath();
-    asset->setFilePath(newPath_);
+    previousAsset_ = *asset;
+    if (replacementAsset_) {
+        const auto originalDisplayName = asset->fileName();
+        asset->setFilePath(replacementAsset_->filePath());
+        asset->setDisplayName(originalDisplayName);
+        asset->setFileSize(replacementAsset_->fileSize());
+        asset->setDuration(replacementAsset_->duration());
+        asset->setDimensions(replacementAsset_->width(), replacementAsset_->height());
+        asset->setFps(replacementAsset_->fps());
+        asset->setHasAudio(replacementAsset_->hasAudio());
+        asset->setHasVideo(replacementAsset_->hasVideo());
+        asset->setSampleRate(replacementAsset_->sampleRate());
+        asset->setChannels(replacementAsset_->channels());
+        asset->setCodec(replacementAsset_->codec());
+    } else {
+        asset->setFilePath(newPath_);
+    }
     executed_ = true;
     return true;
 }
@@ -189,7 +217,21 @@ bool UpdateMediaAssetPathCommand::undo() {
         return false;
     }
 
-    asset->setFilePath(previousPath_);
+    if (previousAsset_) {
+        asset->setFilePath(previousAsset_->filePath());
+        asset->setDisplayName(previousAsset_->displayName());
+        asset->setFileSize(previousAsset_->fileSize());
+        asset->setDuration(previousAsset_->duration());
+        asset->setDimensions(previousAsset_->width(), previousAsset_->height());
+        asset->setFps(previousAsset_->fps());
+        asset->setHasAudio(previousAsset_->hasAudio());
+        asset->setHasVideo(previousAsset_->hasVideo());
+        asset->setSampleRate(previousAsset_->sampleRate());
+        asset->setChannels(previousAsset_->channels());
+        asset->setCodec(previousAsset_->codec());
+    } else {
+        asset->setFilePath(previousPath_);
+    }
     return true;
 }
 

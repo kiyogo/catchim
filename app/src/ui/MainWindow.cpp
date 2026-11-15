@@ -16,12 +16,124 @@
 #include <QUrl>
 #include <QFileInfo>
 #include <QFile>
+#include <QSaveFile>
+#include <QMessageBox>
+#include <QPointer>
 #include <QPushButton>
 #include <QPainter>
 #include <QSplitterHandle>
 #include <cmath>
+#include <filesystem>
+#include <unordered_set>
 
 namespace catchim::ui {
+
+namespace {
+std::string mediaTypeToString(media::MediaType type) {
+    switch (type) {
+        case media::MediaType::Video: return "video";
+        case media::MediaType::Audio: return "audio";
+        case media::MediaType::Image: return "image";
+    }
+    return {};
+}
+
+bool mediaTypeFromString(const std::string& value, media::MediaType& type) {
+    if (value == "video") type = media::MediaType::Video;
+    else if (value == "audio") type = media::MediaType::Audio;
+    else if (value == "image") type = media::MediaType::Image;
+    else return false;
+    return true;
+}
+
+std::string pathToUtf8(const std::filesystem::path& path) {
+    const auto encoded = path.generic_u8string();
+    return std::string(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+}
+
+std::filesystem::path pathFromUtf8(const std::string& path) {
+    std::u8string encoded;
+    encoded.reserve(path.size());
+    for (const unsigned char byte : path) encoded.push_back(static_cast<char8_t>(byte));
+    return std::filesystem::path(encoded);
+}
+
+void saveMediaReferences(editor::Project& project, const media::MediaLibrary& library) {
+    auto& references = project.mediaAssets();
+    references.clear();
+    references.reserve(library.assets().size());
+    for (const auto& asset : library.assets()) {
+        if (!asset) continue;
+        const auto fps = asset->fps();
+        references.push_back({
+            asset->id().str(),
+            pathToUtf8(asset->filePath()),
+            asset->displayName(),
+            mediaTypeToString(asset->type()),
+            asset->fileSize(),
+            asset->duration().ticks(),
+            asset->width(),
+            asset->height(),
+            fps.numerator,
+            fps.denominator,
+            asset->hasAudio(),
+            asset->hasVideo(),
+            asset->sampleRate(),
+            asset->channels(),
+            asset->codec()
+        });
+    }
+}
+
+void restoreMediaReferences(const editor::Project& project, media::MediaLibrary& library) {
+    std::unordered_set<std::string> referencedIds;
+    for (const auto& scene : project.scenes()) {
+        for (const auto* track : scene.timeline().allTracks()) {
+            if (!track) continue;
+            for (const auto& clip : track->clips()) {
+                if (!clip.mediaId().isEmpty()) referencedIds.insert(clip.mediaId().str());
+            }
+        }
+    }
+
+    std::unordered_set<std::string> restoredIds;
+    std::vector<std::shared_ptr<media::MediaAsset>> restored;
+    restored.reserve(project.mediaAssets().size() + library.assets().size());
+    for (const auto& reference : project.mediaAssets()) {
+        media::MediaType type;
+        if (reference.id.empty() || reference.path.empty() ||
+            !mediaTypeFromString(reference.type, type) ||
+            !restoredIds.insert(reference.id).second) {
+            continue;
+        }
+
+        auto asset = std::make_shared<media::MediaAsset>(
+            core::MediaId(reference.id), pathFromUtf8(reference.path), type);
+        asset->setDisplayName(reference.displayName);
+        asset->setFileSize(reference.fileSize);
+        asset->setDuration(core::TimelineTime(reference.durationTicks));
+        asset->setDimensions(reference.width, reference.height);
+        asset->setFps(core::FrameRate{reference.fpsNumerator, reference.fpsDenominator});
+        asset->setHasAudio(reference.hasAudio);
+        asset->setHasVideo(reference.hasVideo);
+        asset->setSampleRate(reference.sampleRate);
+        asset->setChannels(reference.channels);
+        asset->setCodec(reference.codec);
+        restored.push_back(std::move(asset));
+    }
+
+    // Legacy project files did not include a media manifest. Reuse matching
+    // in-memory assets when opening one during the same app session.
+    for (const auto& asset : library.assets()) {
+        if (!asset || !referencedIds.contains(asset->id().str()) ||
+            !restoredIds.insert(asset->id().str()).second) {
+            continue;
+        }
+        restored.push_back(asset);
+    }
+    library.assets() = std::move(restored);
+}
+} // namespace
 
 class EditorSplitterHandle final:public QSplitterHandle {
 public:
@@ -278,6 +390,17 @@ void MainWindow::onThemeToggleRequested() {
 }
 
 void MainWindow::onOpenProject() {
+#if defined(__EMSCRIPTEN__)
+    QPointer<MainWindow> target(this);
+    QFileDialog::getOpenFileContent("Catchim Project (*.json *.catchim);;All Files (*.*)",
+        [target](const QString& fileName, const QByteArray& content) {
+            if (!target || fileName.isEmpty() || content.isEmpty()) return;
+            if (target->engine_.loadProjectFromJson(content.toStdString())) {
+                restoreMediaReferences(target->engine_.project(), target->mediaLibrary_);
+                target->engine_.notifyProjectChanged();
+            }
+        }, this);
+#else
     QString path = QFileDialog::getOpenFileName(this, "Open Catchim Project", "", "Catchim Project (*.json *.catchim);;All Files (*.*)");
     if (path.isEmpty()) return;
 
@@ -285,13 +408,36 @@ void MainWindow::onOpenProject() {
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QByteArray fileData = file.readAll();
         if (engine_.loadProjectFromJson(fileData.toStdString())) {
+            restoreMediaReferences(engine_.project(), mediaLibrary_);
+            activeProjectPath_ = QFileInfo(path).absoluteFilePath();
+            const QString autoSavePath = activeProjectPath_ + ".autosave";
+            if (QFileInfo::exists(autoSavePath) && QFileInfo(autoSavePath).lastModified() > QFileInfo(path).lastModified()) {
+                const auto answer = QMessageBox::question(this, "Phục hồi bản tự lưu",
+                    "Có bản tự lưu mới hơn dự án đã mở. Bạn có muốn phục hồi bản đó không?",
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+                if (answer == QMessageBox::Yes) {
+                    QFile autoSave(autoSavePath);
+                    if (autoSave.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                        const auto recovered = autoSave.readAll();
+                        engine_.loadProjectFromJson(recovered.toStdString());
+                        restoreMediaReferences(engine_.project(), mediaLibrary_);
+                        engine_.project().setDirty(true);
+                    }
+                }
+            }
             engine_.notifyProjectChanged();
         }
     }
+#endif
 }
 
 void MainWindow::onSaveProject() {
     QString defaultName = QString::fromStdString(engine_.project().name()) + ".json";
+    saveMediaReferences(engine_.project(), mediaLibrary_);
+#if defined(__EMSCRIPTEN__)
+    const auto json = engine_.saveProjectToJson();
+    QFileDialog::saveFileContent(QByteArray(json.data(),static_cast<qsizetype>(json.size())),defaultName,this);
+#else
     QString path = QFileDialog::getSaveFileName(this, "Save Catchim Project", defaultName, "Catchim Project (*.json);;All Files (*.*)");
     if (path.isEmpty()) return;
 
@@ -301,6 +447,7 @@ void MainWindow::onSaveProject() {
         file.write(jsonStr.data(), jsonStr.size());
         file.close();
     }
+#endif
 }
 
 void MainWindow::onOpenProjectsHub() {
@@ -310,6 +457,8 @@ void MainWindow::onOpenProjectsHub() {
         if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
             QByteArray data = file.readAll();
             if (engine_.loadProjectFromJson(data.toStdString())) {
+                restoreMediaReferences(engine_.project(), mediaLibrary_);
+                activeProjectPath_ = QFileInfo(filePath).absoluteFilePath();
                 engine_.notifyProjectChanged();
             }
         }

@@ -185,6 +185,28 @@ nlohmann::json ProjectSerializer::toJson(const Project& project) {
 
     j["currentSceneId"] = project.currentSceneId().str();
 
+    nlohmann::json mediaAssets = nlohmann::json::array();
+    for (const auto& asset : project.mediaAssets()) {
+        mediaAssets.push_back({
+            {"id", asset.id},
+            {"path", asset.path},
+            {"displayName", asset.displayName},
+            {"type", asset.type},
+            {"fileSize", asset.fileSize},
+            {"durationTicks", asset.durationTicks},
+            {"width", asset.width},
+            {"height", asset.height},
+            {"fpsNumerator", asset.fpsNumerator},
+            {"fpsDenominator", asset.fpsDenominator},
+            {"hasAudio", asset.hasAudio},
+            {"hasVideo", asset.hasVideo},
+            {"sampleRate", asset.sampleRate},
+            {"channels", asset.channels},
+            {"codec", asset.codec}
+        });
+    }
+    j["mediaAssets"] = std::move(mediaAssets);
+
     // Scenes
     nlohmann::json scenesArr = nlohmann::json::array();
     for (const auto& scene : project.scenes()) {
@@ -248,6 +270,35 @@ core::Result<Project> ProjectSerializer::fromJson(const nlohmann::json& j) {
         project.metadata().thumbnail = m.value("thumbnail", "");
         project.metadata().createdAt = m.value("createdAt", "");
         project.metadata().updatedAt = m.value("updatedAt", "");
+    }
+
+    // Older project files have no media manifest. Keep that format readable.
+    if (j.contains("mediaAssets") && j["mediaAssets"].is_array()) {
+        for (const auto& mediaJson : j["mediaAssets"]) {
+            if (!mediaJson.is_object()) continue;
+            ProjectMediaReference asset;
+            asset.id = mediaJson.value("id", std::string{});
+            asset.path = mediaJson.value("path", std::string{});
+            asset.displayName = mediaJson.value("displayName", std::string{});
+            asset.type = mediaJson.value("type", std::string{});
+            if (asset.id.empty() || asset.path.empty() ||
+                (asset.type != "video" && asset.type != "audio" && asset.type != "image")) {
+                continue;
+            }
+            asset.fileSize = mediaJson.value("fileSize", uint64_t{0});
+            asset.durationTicks = mediaJson.value("durationTicks", int64_t{0});
+            asset.width = mediaJson.value("width", int32_t{0});
+            asset.height = mediaJson.value("height", int32_t{0});
+            asset.fpsNumerator = mediaJson.value("fpsNumerator", int32_t{30});
+            asset.fpsDenominator = mediaJson.value("fpsDenominator", int32_t{1});
+            if (asset.fpsDenominator <= 0) asset.fpsDenominator = 1;
+            asset.hasAudio = mediaJson.value("hasAudio", false);
+            asset.hasVideo = mediaJson.value("hasVideo", false);
+            asset.sampleRate = mediaJson.value("sampleRate", int32_t{44100});
+            asset.channels = mediaJson.value("channels", int32_t{2});
+            asset.codec = mediaJson.value("codec", std::string{});
+            project.mediaAssets().push_back(std::move(asset));
+        }
     }
 
     if (j.contains("settings")) {

@@ -69,3 +69,4 @@ private:
 
 } // namespace catchim::ui
 #endif
+    QString activeProjectPath_;

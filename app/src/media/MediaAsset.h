@@ -26,7 +26,9 @@ public:
     void setFilePath(std::filesystem::path path) { filePath_ = std::move(path); }
     MediaType type() const noexcept { return type_; }
 
-    std::string fileName() const { return filePath_.filename().string(); }
+    const std::string& displayName() const noexcept { return displayName_; }
+    void setDisplayName(std::string name) { displayName_ = std::move(name); }
+    std::string fileName() const { return displayName_.empty() ? filePath_.filename().string() : displayName_; }
     uint64_t fileSize() const noexcept { return fileSize_; }
     void setFileSize(uint64_t size) noexcept { fileSize_ = size; }
 
@@ -59,6 +61,7 @@ private:
     core::MediaId id_;
     std::filesystem::path filePath_;
     MediaType type_;
+    std::string displayName_;
     uint64_t fileSize_{0};
     core::TimelineTime duration_{core::TimelineTime(0)};
     int32_t width_{0};

@@ -81,6 +81,7 @@ private:
     void updateSortMenu();
     void applySort();
     void requestThumbnail(const std::shared_ptr<media::MediaAsset>& asset);
+    bool applyMediaReplacement(const core::MediaId& id, std::shared_ptr<media::MediaAsset> replacement);
     QHash<QString,QImage> mediaThumbnails_;
     QSet<QString> pendingThumbnails_;
     QThreadPool thumbnailPool_;

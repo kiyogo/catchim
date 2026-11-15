@@ -86,6 +86,11 @@ public:
         core::MediaId assetId,
         std::filesystem::path newPath
     );
+    UpdateMediaAssetPathCommand(
+        media::MediaLibrary& library,
+        core::MediaId assetId,
+        std::shared_ptr<media::MediaAsset> replacementAsset
+    );
 
     bool execute() override;
     bool undo() override;
@@ -96,6 +101,8 @@ private:
     core::MediaId assetId_;
     std::filesystem::path newPath_;
     std::filesystem::path previousPath_;
+    std::shared_ptr<media::MediaAsset> replacementAsset_;
+    std::optional<media::MediaAsset> previousAsset_;
     bool executed_{false};
 };
 
