@@ -862,20 +862,23 @@ QWidget* AssetsPanel::createMediaView() {
 QWidget* AssetsPanel::createAudioView() {
     auto* view = new QWidget(this);
     auto* layout = new QVBoxLayout(view);
-    // Keep the audio panel controls on the same horizontal inset.
-    layout->setContentsMargins(12,8,12,0);
+    // Apply equal outer insets to controls and scroll content. The scroll area
+    // spans the panel so its scrollbar gutter can be balanced on the opposite side.
+    layout->setContentsMargins(0,8,0,0);
     layout->setSpacing(8);
 
     auto* search=new QLineEdit(view);search->setObjectName("soundSearch");search->setPlaceholderText("Tìm kiếm…");search->setClearButtonEnabled(true);search->setFixedHeight(28);
-    auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(0,0,0,0);searchRow->addWidget(search);layout->addLayout(searchRow);
-    auto* tabs=new QWidget(view);auto* tabLayout=new QHBoxLayout(tabs);tabLayout->setContentsMargins(0,0,0,0);tabLayout->setSpacing(0);
+    auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(12,0,12,0);searchRow->addWidget(search);layout->addLayout(searchRow);
+    auto* tabs=new QWidget(view);auto* tabLayout=new QHBoxLayout(tabs);tabLayout->setContentsMargins(12,0,12,0);tabLayout->setSpacing(0);
     auto* libraryTab=new QPushButton("Hiệu ứng âm thanh",tabs);auto* savedTab=new QPushButton("Đã lưu",tabs);auto* voiceoverTab=new QPushButton("Thu âm",tabs);
     auto* tabGroup=new QButtonGroup(tabs);
     for(auto* b:{libraryTab,savedTab,voiceoverTab}){b->setCheckable(true);b->setFixedHeight(36);b->setProperty("class","browseTab");tabGroup->addButton(b);tabLayout->addWidget(b);}
     libraryTab->setChecked(true);tabLayout->addStretch();layout->addWidget(tabs);
     auto* notice=new QLabel("Thư viện âm thanh trực tuyến chưa được kết nối.",view);
-    notice->setProperty("class","sectionCaption");notice->setWordWrap(true);notice->setContentsMargins(0,8,0,8);layout->addWidget(notice);
-    auto* localToggle=new QPushButton("Âm thử tổng hợp trên máy  ⌄",view);localToggle->setCheckable(true);localToggle->setProperty("class","sectionToggle");localToggle->setFixedHeight(28);layout->addWidget(localToggle);
+    notice->setProperty("class","sectionCaption");notice->setWordWrap(true);notice->setContentsMargins(12,8,12,8);layout->addWidget(notice);
+    auto* localToggleRow=new QWidget(view);auto* localToggleLayout=new QHBoxLayout(localToggleRow);
+    localToggleLayout->setContentsMargins(12,0,12,0);
+    auto* localToggle=new QPushButton("Âm thử tổng hợp trên máy  ⌄",localToggleRow);localToggle->setCheckable(true);localToggle->setProperty("class","sectionToggle");localToggle->setFixedHeight(28);localToggleLayout->addWidget(localToggle);layout->addWidget(localToggleRow);
 
     auto* voiceoverScroll=new QScrollArea(view);
     voiceoverScroll->setWidgetResizable(true);
@@ -884,7 +887,7 @@ QWidget* AssetsPanel::createAudioView() {
     voiceoverScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* voiceoverContainer=new QWidget(voiceoverScroll);
     auto* voiceoverContainerLayout=new QVBoxLayout(voiceoverContainer);
-    voiceoverContainerLayout->setContentsMargins(0,0,0,8);
+    voiceoverContainerLayout->setContentsMargins(12,0,12,8);
     voiceoverContainerLayout->setSpacing(8);
     auto* voiceoverCard=new QWidget(voiceoverContainer);
     voiceoverCard->setProperty("class","cardWidget");
@@ -1026,7 +1029,7 @@ QWidget* AssetsPanel::createAudioView() {
     sfxScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* sfxContainer = new QWidget(sfxScroll);
     auto* sfxLayout = new QVBoxLayout(sfxContainer);
-    sfxLayout->setContentsMargins(0, 0, 0, 8);
+    sfxLayout->setContentsMargins(12, 0, 12, 8);
     sfxLayout->setSpacing(6);
 
     auto favoriteNames = std::make_shared<QSet<QString>>();
@@ -1173,27 +1176,27 @@ QWidget* AssetsPanel::createAudioView() {
     refreshSoundRows();
     connect(search, &QLineEdit::textChanged, sfxContainer, [refreshSoundRows] { refreshSoundRows(); });
     connect(savedTab, &QPushButton::clicked, view,
-            [search, sfxScroll, localToggle, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows] {
+            [search, sfxScroll, localToggle, localToggleRow, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows] {
         search->show();
         *savedOnly = true;
         refreshSoundRows();
         sfxScroll->show();
-        localToggle->hide();
+        localToggleRow->hide();
         voiceoverScroll->hide();
         recordingTimer->stop();
     });
     connect(libraryTab, &QPushButton::clicked, view,
-            [search, notice, localToggle, sfxScroll, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows] {
+            [search, notice, localToggle, localToggleRow, sfxScroll, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows] {
         search->show();
         *savedOnly = false;
         notice->setText("Thư viện âm thanh trực tuyến chưa được kết nối.");
         refreshSoundRows();
-        localToggle->show();
+        localToggleRow->show();
         sfxScroll->setVisible(localToggle->isChecked());
         voiceoverScroll->hide();
         recordingTimer->stop();
     });
-    connect(voiceoverTab,&QPushButton::clicked,view,[search,notice,sfxScroll,localToggle,voiceoverScroll,recordingTimer]{search->hide();notice->hide();sfxScroll->hide();localToggle->hide();voiceoverScroll->show();recordingTimer->start();});
+    connect(voiceoverTab,&QPushButton::clicked,view,[search,notice,sfxScroll,localToggleRow,voiceoverScroll,recordingTimer]{search->hide();notice->hide();sfxScroll->hide();localToggleRow->hide();voiceoverScroll->show();recordingTimer->start();});
 
     return view;
 }
