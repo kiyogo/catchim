@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(CatchimApp VERSION 0.1.0 LANGUAGES CXX)
 
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CatchimTranscriptionWorker.cmake")
+cmake_language(DEFER CALL catchim_attach_transcription_worker catchim_app)
+
 # An unset build type otherwise produces -O0 WASM: the per-pixel preview
 # compositor then cannot keep up with playback, even with native decoding.
 if(EMSCRIPTEN AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)

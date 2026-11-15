@@ -10,9 +10,14 @@
 #include "ui/widgets/BalancedScrollMargins.h"
 #include "editor/history/commands/ElementCommands.h"
 #include "editor/history/commands/BatchCommand.h"
+#include "editor/history/commands/InsertElementCommand.h"
+#include "editor/history/commands/TrackCommands.h"
 #include "editor/history/commands/EffectCommands.h"
 #include "editor/history/commands/MediaCommands.h"
 #include "editor/timeline/ElementUtils.h"
+#include "audio/AudioPlaybackEngine.h"
+#include "subtitles/TranscriptionEngine.h"
+#include "subtitles/TranscriptionService.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QMessageBox>
@@ -63,6 +68,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QUuid>
+#include <QFontMetricsF>
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
 #endif
@@ -1682,12 +1688,203 @@ QWidget* AssetsPanel::createSubtitlesView() {
     auto* generate = new QPushButton("Tạo bản chép lời",content); generate->setObjectName("generateCaptions");
     generate->setFixedHeight(32);
     generate->setStyleSheet(QString("QPushButton {background:%1;color:white;border:none;border-radius:10px;} QPushButton:hover {background:#009bdc;}").arg(Theme::instance().palette().primaryAccent.name()));
-    connect(generate,&QPushButton::clicked,this,[this,status] {
-        const auto* timeline=engine_.activeTimeline();
-        status->setText(!timeline || timeline->totalDuration().toSeconds()<=0
-            ? "Chưa có âm thanh trên dòng thời gian để chép lời."
-            : "Bản desktop chưa kết nối mô hình nhận dạng giọng nói. Bạn có thể nhập tệp phụ đề đã có bằng nút Nhập.");
+    connect(generate,&QPushButton::clicked,this,[this,status,generate,language] {
+        const auto* timeline = engine_.activeTimeline();
+        const auto* scene = engine_.project().activeScene();
+        if (!timeline || !scene || timeline->totalDuration().toSeconds() <= 0.0) {
+            status->setText("Chưa có âm thanh trên dòng thời gian để chép lời.");
+            status->setStyleSheet(QString("color:%1;font-size:12px;")
+                .arg(Theme::instance().palette().destructive.name()));
+            status->show();
+            return;
+        }
+
+        editor::Timeline timelineSnapshot = *timeline;
+        const core::SceneId sceneId = scene->id();
+        const double totalDuration = timelineSnapshot.totalDuration().toSeconds();
+        auto mediaAssetsSnapshot = mediaLibrary_.assets();
+        const std::string languageCode = language->currentData().toString().toStdString();
+        const QColor progressColor = Theme::instance().palette().primaryAccent;
+
+        QPointer<AssetsPanel> target(this);
+        QPointer<QLabel> statusWidget(status);
+        QPointer<QPushButton> generateButton(generate);
+        status->setText("Đang chuẩn bị âm thanh trên dòng thời gian…");
+        status->setStyleSheet(QString("color:%1;font-size:12px;")
+            .arg(Theme::instance().palette().primaryAccent.name()));
         status->show();
+        generate->setEnabled(false);
+        generate->setText("Đang chép lời…");
+
+        QThreadPool::globalInstance()->start(QRunnable::create(
+            [target, statusWidget, generateButton, timelineSnapshot = std::move(timelineSnapshot),
+             mediaAssetsSnapshot = std::move(mediaAssetsSnapshot), sceneId, totalDuration,
+             languageCode, progressColor]() mutable {
+                media::MediaLibrary mediaSnapshot;
+                mediaSnapshot.assets() = std::move(mediaAssetsSnapshot);
+                audio::AudioPlaybackEngine mixer;
+
+                const subtitles::TranscriptionService::AudioChunkProvider renderChunk =
+                    [&timelineSnapshot, &mediaSnapshot, &mixer](double startSeconds,
+                                                               double durationSeconds,
+                                                               std::vector<float>& monoSamples) {
+                        constexpr int kSampleRate = 16000;
+                        auto mixed = mixer.renderAudioSlice(
+                            timelineSnapshot,
+                            core::TimelineTime::fromSeconds(startSeconds),
+                            core::TimelineTime::fromSeconds(durationSeconds),
+                            kSampleRate,
+                            &mediaSnapshot,
+                            true);
+                        const auto& stereo = mixed.samples();
+                        if (stereo.size() < 2) {
+                            monoSamples.clear();
+                            return true;
+                        }
+
+                        const size_t frameCount = stereo.size() / 2;
+                        monoSamples.resize(frameCount);
+                        for (size_t frame = 0; frame < frameCount; ++frame) {
+                            const float left = std::isfinite(stereo[frame * 2]) ? stereo[frame * 2] : 0.0f;
+                            const float right = std::isfinite(stereo[frame * 2 + 1]) ? stereo[frame * 2 + 1] : 0.0f;
+                            monoSamples[frame] = std::clamp((left + right) * 0.5f, -1.0f, 1.0f);
+                        }
+                        return true;
+                    };
+
+                const auto postUi = [target, statusWidget](QString message, QColor color) {
+                    if (!target) return;
+                    QMetaObject::invokeMethod(target.data(), [target, statusWidget, message = std::move(message), color] {
+                        if (!target || !statusWidget) return;
+                        statusWidget->setText(message);
+                        statusWidget->setStyleSheet(QString("color:%1;font-size:12px;").arg(color.name()));
+                        statusWidget->show();
+                    }, Qt::QueuedConnection);
+                };
+
+                subtitles::TranscriptionService service;
+                const auto result = service.transcribeStream(
+                    totalDuration,
+                    renderChunk,
+                    languageCode,
+                    "whisper-small",
+                    [postUi, progressColor](const subtitles::TranscriptionProgress& progress) {
+                        QString message = QString::fromStdString(progress.message);
+                        if (progress.status == subtitles::TranscriptionStatus::LoadingModel) {
+                            message += QString(" %1%").arg(qRound(progress.progress * 100.0));
+                        }
+                        postUi(std::move(message), progressColor);
+                    });
+
+                if (!target) return;
+                QMetaObject::invokeMethod(target.data(),
+                    [target, statusWidget, generateButton, sceneId, result]() mutable {
+                        if (!target) return;
+                        if (generateButton) {
+                            generateButton->setEnabled(true);
+                            generateButton->setText("Tạo bản chép lời");
+                        }
+                        if (!statusWidget) return;
+
+                        const auto& palette = Theme::instance().palette();
+                        auto showResult = [statusWidget](const QString& message, const QColor& color) {
+                            if (!statusWidget) return;
+                            statusWidget->setText(message);
+                            statusWidget->setStyleSheet(QString("color:%1;font-size:12px;").arg(color.name()));
+                            statusWidget->show();
+                        };
+
+                        if (!result.error.empty()) {
+                            showResult(QString::fromStdString(result.error), palette.destructive);
+                            return;
+                        }
+                        if (result.segments.empty()) {
+                            showResult("Không nhận diện được giọng nói trong dòng thời gian.", palette.textSecondary);
+                            return;
+                        }
+
+                        const auto* activeScene = target->engine_.project().activeScene();
+                        if (!activeScene || activeScene->id() != sceneId) {
+                            showResult("Cảnh đã thay đổi trong lúc chép lời; phụ đề chưa được thêm.", palette.destructive);
+                            return;
+                        }
+                        auto* destination = target->engine_.activeTimeline();
+                        if (!destination) {
+                            showResult("Không tìm thấy dòng thời gian để thêm phụ đề.", palette.destructive);
+                            return;
+                        }
+
+                        const auto captions = subtitles::TranscriptionEngine::buildCaptionChunks(result.segments);
+                        if (captions.empty()) {
+                            showResult("Không tạo được đoạn phụ đề từ kết quả nhận dạng.", palette.destructive);
+                            return;
+                        }
+
+                        auto batch = std::make_unique<editor::BatchCommand>("Generate captions");
+                        auto addTrack = std::make_unique<editor::AddTrackCommand>(
+                            *destination, editor::TrackType::Text, "Phụ đề", 0);
+                        const core::TrackId captionTrackId = addTrack->trackId();
+                        batch->addCommand(std::move(addTrack));
+
+                        const int canvasWidth = std::max(
+                            1, target->engine_.project().settings().canvasSize.width);
+                        const int canvasHeight = std::max(
+                            1, target->engine_.project().settings().canvasSize.height);
+                        size_t insertedCaptions = 0;
+                        for (size_t index = 0; index < captions.size(); ++index) {
+                            const auto& caption = captions[index];
+                            if (caption.text.empty() || caption.duration <= 0.0) continue;
+
+                            const auto startTime = core::TimelineTime::fromSeconds(caption.startTime);
+                            const auto duration = core::TimelineTime::fromSeconds(caption.duration);
+                            editor::Clip clip(
+                                core::ClipId::generate(), editor::ClipType::Text,
+                                caption.text, startTime, duration);
+                            QFont captionFont("Arial");
+                            captionFont.setPixelSize(std::max(1, qRound(5.0 * canvasHeight / 90.0)));
+                            captionFont.setBold(true);
+                            const QFontMetricsF captionMetrics(captionFont);
+                            const QRect captionBoundsRect(40, 0, std::max(1, canvasWidth - 80), canvasHeight);
+                            const QRectF captionBounds = captionMetrics.boundingRect(
+                                captionBoundsRect,
+                                Qt::AlignHCenter | Qt::AlignVCenter | Qt::TextWordWrap,
+                                QString::fromStdString(caption.text));
+                            const double bottomAlignedPositionY = canvasHeight * 0.95 - captionBounds.bottom();
+                            clip.setParam("text.content", caption.text);
+                            // Match the web subtitle layout: center the text box,
+                            // then place it near the bottom with the transform.
+                            clip.setParam("text.style", std::string("center"));
+                            clip.setParam("text.color", std::string("#FFFFFF"));
+                            clip.setParam("text.fontSize", 5.0);
+                            clip.setParam("text.fontFamily", std::string("Arial"));
+                            clip.setParam("text.fontWeight", std::string("bold"));
+                            clip.setParam("text.fontStyle", std::string("normal"));
+                            clip.setParam("text.textDecoration", std::string("none"));
+                            clip.setParam("text.textAlign", std::string("center"));
+                            clip.setParam("text.webLayout", true);
+                            clip.setParam("transform.positionY", bottomAlignedPositionY);
+
+                            editor::InsertElementPlacement placement;
+                            placement.mode = editor::InsertElementPlacement::Mode::Explicit;
+                            placement.explicitTrackId = captionTrackId;
+                            placement.startTime = startTime;
+                            batch->addCommand(std::make_unique<editor::InsertElementCommand>(
+                                *destination, std::move(clip), placement, &target->engine_.project()));
+                            ++insertedCaptions;
+                        }
+
+                        if (insertedCaptions == 0 || !target->engine_.history().execute(std::move(batch))) {
+                            showResult("Không thể thêm các đoạn phụ đề vào dòng thời gian.", palette.destructive);
+                            return;
+                        }
+
+                        target->engine_.project().setDirty(true);
+                        target->engine_.playback().setDuration(target->engine_.project().totalDuration());
+                        target->engine_.notifyTimelineChanged();
+                        showResult(QString("Đã thêm %1 đoạn phụ đề vào một track mới.").arg(insertedCaptions),
+                                   palette.primaryAccent);
+                    }, Qt::QueuedConnection);
+            }));
     });
     body->addWidget(generate); layout->addWidget(content,1);
     return view;

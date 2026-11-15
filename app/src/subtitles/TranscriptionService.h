@@ -10,6 +10,7 @@ namespace catchim::subtitles {
 
 enum class TranscriptionStatus {
     Idle,
+    PreparingAudio,
     LoadingModel,
     Transcribing,
     Complete,
@@ -27,11 +28,16 @@ struct TranscriptionResult {
     std::string text;
     std::vector<TranscriptionSegment> segments;
     std::string language;
+    std::string error;
 };
 
 class TranscriptionService {
 public:
     using ProgressCallback = std::function<void(const TranscriptionProgress&)>;
+    using AudioChunkProvider = std::function<bool(
+        double startSeconds,
+        double durationSeconds,
+        std::vector<float>& monoSamples)>;
 
     TranscriptionService();
     ~TranscriptionService() = default;
@@ -41,6 +47,15 @@ public:
 
     TranscriptionResult transcribe(
         const std::vector<float>& audioData,
+        const std::string& language = "auto",
+        const std::string& modelId = "whisper-small",
+        ProgressCallback onProgress = nullptr);
+
+    // Pulls 30-second mono 16 kHz chunks as needed so long timelines do not
+    // need to be materialized as one large PCM buffer before Whisper runs.
+    TranscriptionResult transcribeStream(
+        double totalDurationSeconds,
+        const AudioChunkProvider& audioChunkProvider,
         const std::string& language = "auto",
         const std::string& modelId = "whisper-small",
         ProgressCallback onProgress = nullptr);
