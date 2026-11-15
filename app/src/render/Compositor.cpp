@@ -1,6 +1,10 @@
 #include "Compositor.h"
+#include "render/effects/BlurEffect.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <limits>
+#include <numeric>
 
 #if defined(HAVE_QT6)
 #include <QImage>
@@ -250,55 +254,76 @@ void Compositor::applyVignette(
 }
 
 void Compositor::applyGaussianBlur(uint8_t* pixels, int32_t w, int32_t h, double radius) {
-    if (!pixels || w <= 0 || h <= 0 || radius <= 0.5) return;
-    int r = static_cast<int>(std::round(radius));
-    r = std::clamp(r, 1, 50);
+    applyGaussianBlur(pixels, w, h, radius, radius);
+}
 
-    std::vector<uint8_t> temp(w * h * 4);
+void Compositor::applyGaussianBlur(
+    uint8_t* pixels,
+    int32_t w,
+    int32_t h,
+    double sigmaX,
+    double sigmaY
+) {
+    if (!pixels || w <= 0 || h <= 0 || !std::isfinite(sigmaX) || !std::isfinite(sigmaY)) return;
+    sigmaX = std::max(0.0, sigmaX);
+    sigmaY = std::max(0.0, sigmaY);
+    if (std::max(sigmaX, sigmaY) < 0.001) return;
 
-    // Horizontal pass
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            int32_t rSum = 0, gSum = 0, bSum = 0, aSum = 0;
-            int count = 0;
-            for (int kx = -r; kx <= r; ++kx) {
-                int px = std::clamp(x + kx, 0, w - 1);
-                int idx = (y * w + px) * 4;
-                rSum += pixels[idx + 0];
-                gSum += pixels[idx + 1];
-                bSum += pixels[idx + 2];
-                aSum += pixels[idx + 3];
-                count++;
+    const size_t width = static_cast<size_t>(w);
+    const size_t height = static_cast<size_t>(h);
+    if (width > std::numeric_limits<size_t>::max() / 4 / height) return;
+    const size_t byteCount = width * height * 4;
+
+    const auto passes = BlurEffect::buildGaussianBlurPasses(
+        static_cast<float>(sigmaX), static_cast<float>(sigmaY));
+    std::vector<uint8_t> current(pixels, pixels + byteCount);
+    std::vector<uint8_t> next(byteCount);
+
+    for (const auto& pass : passes) {
+        const float sigma = pass.sigma;
+        if (sigma < 0.001f) continue;
+
+        const int radius = std::min(40, static_cast<int>(std::ceil(sigma * 3.0f)));
+        if (radius <= 0) continue;
+
+        const auto weights = BlurEffect::compute1DGaussianKernel(sigma, radius);
+        const float weightSum = std::accumulate(weights.begin(), weights.end(), 0.0f);
+        if (weightSum <= 0.0f) continue;
+
+        const bool horizontal = pass.direction.first != 0.0f;
+        const float axis = horizontal ? pass.direction.first : pass.direction.second;
+        const float step = pass.step * axis;
+        const uint8_t* source = current.data();
+        uint8_t* destination = next.data();
+
+        for (int32_t y = 0; y < h; ++y) {
+            for (int32_t x = 0; x < w; ++x) {
+                float colorSum[4]{};
+                for (int tap = -radius; tap <= radius; ++tap) {
+                    // WGSL converts the floating sample offset to i32, which truncates toward zero.
+                    const int offset = static_cast<int>(static_cast<float>(tap) * step);
+                    const int32_t sampleX = horizontal ? std::clamp(x + offset, 0, w - 1) : x;
+                    const int32_t sampleY = horizontal ? y : std::clamp(y + offset, 0, h - 1);
+                    const size_t sampleIndex =
+                        (static_cast<size_t>(sampleY) * width + static_cast<size_t>(sampleX)) * 4;
+                    const float weight = weights[static_cast<size_t>(tap + radius)];
+                    for (size_t channel = 0; channel < 4; ++channel) {
+                        colorSum[channel] += static_cast<float>(source[sampleIndex + channel]) * weight;
+                    }
+                }
+
+                const size_t outputIndex = (static_cast<size_t>(y) * width + static_cast<size_t>(x)) * 4;
+                for (size_t channel = 0; channel < 4; ++channel) {
+                    // WebGPU stores rgba8unorm after each pass; quantize each CPU pass likewise.
+                    const long value = std::lround(colorSum[channel] / weightSum);
+                    destination[outputIndex + channel] = static_cast<uint8_t>(std::clamp(value, 0L, 255L));
+                }
             }
-            int outIdx = (y * w + x) * 4;
-            temp[outIdx + 0] = static_cast<uint8_t>(rSum / count);
-            temp[outIdx + 1] = static_cast<uint8_t>(gSum / count);
-            temp[outIdx + 2] = static_cast<uint8_t>(bSum / count);
-            temp[outIdx + 3] = static_cast<uint8_t>(aSum / count);
         }
+        current.swap(next);
     }
 
-    // Vertical pass
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            int32_t rSum = 0, gSum = 0, bSum = 0, aSum = 0;
-            int count = 0;
-            for (int ky = -r; ky <= r; ++ky) {
-                int py = std::clamp(y + ky, 0, h - 1);
-                int idx = (py * w + x) * 4;
-                rSum += temp[idx + 0];
-                gSum += temp[idx + 1];
-                bSum += temp[idx + 2];
-                aSum += temp[idx + 3];
-                count++;
-            }
-            int outIdx = (y * w + x) * 4;
-            pixels[outIdx + 0] = static_cast<uint8_t>(rSum / count);
-            pixels[outIdx + 1] = static_cast<uint8_t>(gSum / count);
-            pixels[outIdx + 2] = static_cast<uint8_t>(bSum / count);
-            pixels[outIdx + 3] = static_cast<uint8_t>(aSum / count);
-        }
-    }
+    std::memcpy(pixels, current.data(), byteCount);
 }
 
 void Compositor::applyChromaKey(

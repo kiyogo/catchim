@@ -63,6 +63,14 @@ public:
         double radius
     );
 
+    static void applyGaussianBlur(
+        uint8_t* pixels,
+        int32_t w,
+        int32_t h,
+        double sigmaX,
+        double sigmaY
+    );
+
     static void applyChromaKey(
         uint8_t* pixels,
         int32_t w,

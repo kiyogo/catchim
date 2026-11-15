@@ -70,8 +70,7 @@ void applyEffect(
         if (intensity <= 0.001) return;
         const double sigmaX = EffectDefinitionRegistry::intensityToSigma(intensity, width, 1920.0);
         const double sigmaY = EffectDefinitionRegistry::intensityToSigma(intensity, height, 1080.0);
-        const int radius = std::clamp(static_cast<int>(std::ceil(std::max(sigmaX, sigmaY))), 1, 50);
-        Compositor::applyGaussianBlur(pixels.data(), width, height, radius);
+        Compositor::applyGaussianBlur(pixels.data(), width, height, sigmaX, sigmaY);
         return;
     }
 
