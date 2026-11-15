@@ -1,5 +1,6 @@
 #include "RenderEngine.h"
 #include "render/effects/ClipEffectRenderer.h"
+#include "render/RenderParamResolvers.h"
 #include "media/decoder/NativeVideoDecoder.h"
 #include "media/MediaLibrary.h"
 #include <algorithm>
@@ -143,16 +144,28 @@ const CompositorOutput& RenderEngine::renderFrame(
         layer.sourceWidth = compositor_.width();
         layer.sourceHeight = compositor_.height();
 
-        // Extract Transform
-        layer.transform.positionX = clip.getParam<double>("transform.positionX", 0.0);
-        layer.transform.positionY = clip.getParam<double>("transform.positionY", 0.0);
+        // Resolve animated transform and opacity at the clip-local playhead time.
+        const auto localTime=time-clip.startTime();
+        auto resolvedTransform=RenderParamResolvers::buildTransformFromParams(clip.params());
+        if(!clip.animationChannels().empty()) {
+            std::vector<editor::AnimationChannel> channels;
+            channels.reserve(clip.animationChannels().size());
+            for(const auto& [property,channel]:clip.animationChannels()) {
+                (void)property;
+                channels.push_back(channel);
+            }
+            resolvedTransform=RenderParamResolvers::resolveTransformAtTime(
+                resolvedTransform,channels,localTime);
+        }
+        layer.transform.positionX = resolvedTransform.positionX;
+        layer.transform.positionY = resolvedTransform.positionY;
         const double outputScaleX=static_cast<double>(compositor_.width())/std::max(1,project.settings().canvasSize.width);
         const double outputScaleY=static_cast<double>(compositor_.height())/std::max(1,project.settings().canvasSize.height);
         layer.transform.positionX*=outputScaleX;layer.transform.positionY*=outputScaleY;
-        layer.transform.scaleX = clip.getParam<double>("transform.scaleX", 1.0);
-        layer.transform.scaleY = clip.getParam<double>("transform.scaleY", 1.0);
-        layer.transform.rotate = clip.getParam<double>("transform.rotate", 0.0);
-        layer.transform.opacity = clip.getParam<double>("opacity", 1.0);
+        layer.transform.scaleX = resolvedTransform.scaleX;
+        layer.transform.scaleY = resolvedTransform.scaleY;
+        layer.transform.rotate = resolvedTransform.rotate;
+        layer.transform.opacity = std::clamp(resolvedTransform.opacity,0.0,1.0);
         const auto transitionType = clip.getParam<std::string>("transition.type", "");
         const double transitionDuration = std::clamp(
             clip.getParam<double>("transition.duration", 0.0), 0.0, clip.duration().toSeconds());

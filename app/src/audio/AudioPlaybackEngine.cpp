@@ -23,11 +23,16 @@ double AudioPlaybackEngine::linearToDb(double linear) {
 double AudioPlaybackEngine::resolveEffectiveAudioGain(
     const editor::Clip& clip,
     bool trackMuted,
-    core::TimelineTime /*localTime*/
+    core::TimelineTime localTime
 ) {
     if (trackMuted || clip.isMuted() || clip.getParam<bool>("muted", false) ||
         (clip.type()==editor::ClipType::Video&&!clip.getParam<bool>("isSourceAudioEnabled",true))) {
         return 0.0;
+    }
+
+    if(const auto* channel=clip.findAnimationChannel("volume");channel&&!channel->empty()) {
+        const auto safeTime=localTime.ticks()<0?core::TimelineTime(0):localTime;
+        return dBToLinear(channel->getValueAt(safeTime));
     }
 
     double vol = clip.getParam<double>("volume", 0.0);
@@ -102,8 +107,14 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
                 std::round((overlapEnd - overlapStart).toSeconds() * sampleRate)
             );
 
-            double gain = resolveEffectiveAudioGain(clip, false, overlapStart - clipStart);
-            if (gain <= 0.0001) continue;
+            const auto* volumeChannel=clip.findAnimationChannel("volume");
+            const bool hasAnimatedGain=volumeChannel&&!volumeChannel->empty();
+            const double gain = resolveEffectiveAudioGain(clip, false, overlapStart - clipStart);
+            if (!hasAnimatedGain&&gain<=0.0001) continue;
+            const auto gainAtLocalTime=[&](double localSec) {
+                if(!hasAnimatedGain)return gain;
+                return dBToLinear(volumeChannel->getValueAt(core::TimelineTime::fromSeconds(localSec)));
+            };
 
             double speed = clip.getParam<double>("speed", 1.0);
             if (speed <= 0.01) speed = 1.0;
@@ -166,7 +177,7 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
                             }
 
                             fadeFactor *= transitionFadeAt(localSec);
-                            double effectiveGain = gain * fadeFactor;
+                            double effectiveGain = gainAtLocalTime(localSec) * fadeFactor;
                             size_t srcFrameIdx = static_cast<size_t>(sourceSec * sampleRate);
                             if (srcFrameIdx < totalSourceFrames) {
                                 outSamples[frameIdx * 2 + 0] += static_cast<float>(pcm[srcFrameIdx * 2 + 0] * effectiveGain);
@@ -186,7 +197,7 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
                     const double localSec = (overlapStart - clipStart).toSeconds() + static_cast<double>(i) / sampleRate;
                     double t = (overlapStart.toSeconds() + static_cast<double>(i) / sampleRate);
                     // Blended signal proportional to gain
-                    float sample = static_cast<float>(std::sin(2.0 * 3.1415926535 * 440.0 * t) * 0.2 * gain * transitionFadeAt(localSec));
+                    float sample = static_cast<float>(std::sin(2.0 * 3.1415926535 * 440.0 * t) * 0.2 * gainAtLocalTime(localSec) * transitionFadeAt(localSec));
 
                     outSamples[frameIdx * 2 + 0] += sample;
                     outSamples[frameIdx * 2 + 1] += sample;
