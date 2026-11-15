@@ -156,7 +156,15 @@ int Application::run() {
     ui::MainWindow mainWindow(*editorEngine_, *mediaLibrary_, *renderEngine_);
     mainWindow.resize(config_.windowWidth, config_.windowHeight);
 #if defined(__EMSCRIPTEN__)
-    mainWindow.showFullScreen();
+    // Qt WebAssembly implements decorated fullscreen top-level windows as a
+    // floating DOM window inside the page. The editor is the page surface, so
+    // keep its root window frameless and maximized within the loader mount.
+    // Paint the top-level window with the active palette as well as its
+    // central widget; otherwise the unstyled WASM window surface can show
+    // through as a dark strip in light theme.
+    mainWindow.setAttribute(Qt::WA_StyledBackground, true);
+    mainWindow.setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
+    mainWindow.showMaximized();
 #else
     if (config_.maximized) {
         mainWindow.showMaximized();
