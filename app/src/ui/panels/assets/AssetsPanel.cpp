@@ -568,7 +568,7 @@ static QWidget* createPanelHeaderWidget(QWidget* parent, const QString& title, Q
     header->setObjectName("panelHeader");
     header->setStyleSheet(QString("border-bottom: 1px solid %1; background: transparent;").arg(Theme::instance().mode() == ThemeMode::Light ? QStringLiteral("#dedede") : QStringLiteral("#2e2e2e")));
     auto* hLayout = new QHBoxLayout(header);
-    hLayout->setContentsMargins(12, 0, 8, 0);
+    hLayout->setContentsMargins(12, 0, 12, 0);
     hLayout->setSpacing(6);
 
     auto* titleLabel = new QLabel(title, header);
@@ -594,7 +594,7 @@ QWidget* AssetsPanel::createMediaView() {
     header->setObjectName("panelHeader");
     header->setStyleSheet(QString("border-bottom: 1px solid %1; background: transparent;").arg(Theme::instance().mode() == ThemeMode::Light ? QStringLiteral("#dedede") : QStringLiteral("#2e2e2e")));
     auto* hLayout = new QHBoxLayout(header);
-    hLayout->setContentsMargins(12, 0, 8, 0);
+    hLayout->setContentsMargins(12, 0, 12, 0);
     hLayout->setSpacing(6);
 
     auto* titleLabel = new QLabel("Tệp media", header);
@@ -1697,7 +1697,7 @@ QWidget* AssetsPanel::createSettingsView() {
     tabs->setObjectName("settingsTabs");
     tabs->setFixedHeight(44);
     auto* tabsLayout = new QHBoxLayout(tabs);
-    tabsLayout->setContentsMargins(18,0,8,0);
+    tabsLayout->setContentsMargins(8,0,8,0);
     tabsLayout->setSpacing(4);
     auto* infoTab = new QPushButton("Thông tin dự án", tabs);
     auto* backgroundTab = new QPushButton("Nền", tabs);
@@ -1718,7 +1718,7 @@ QWidget* AssetsPanel::createSettingsView() {
 
     auto* container = new QWidget(scroll);
     auto* cLayout = new QVBoxLayout(container);
-    cLayout->setContentsMargins(0,0,0,0);
+    cLayout->setContentsMargins(8,0,8,0);
     cLayout->setSpacing(0);
     auto* pages = new QStackedWidget(container);
     auto* infoPage = new QWidget(pages);
