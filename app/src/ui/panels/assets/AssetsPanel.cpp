@@ -592,7 +592,7 @@ static QWidget* createPanelHeaderWidget(QWidget* parent, const QString& title, Q
     header->setObjectName("panelHeader");
     header->setStyleSheet(QString("border-bottom: 1px solid %1; background: transparent;").arg(Theme::instance().mode() == ThemeMode::Light ? QStringLiteral("#dedede") : QStringLiteral("#2e2e2e")));
     auto* hLayout = new QHBoxLayout(header);
-    hLayout->setContentsMargins(12, 0, 12, 0);
+    hLayout->setContentsMargins(0, 0, 0, 0);
     hLayout->setSpacing(6);
 
     auto* titleLabel = new QLabel(title, header);
@@ -618,7 +618,7 @@ QWidget* AssetsPanel::createMediaView() {
     header->setObjectName("panelHeader");
     header->setStyleSheet(QString("border-bottom: 1px solid %1; background: transparent;").arg(Theme::instance().mode() == ThemeMode::Light ? QStringLiteral("#dedede") : QStringLiteral("#2e2e2e")));
     auto* hLayout = new QHBoxLayout(header);
-    hLayout->setContentsMargins(12, 0, 12, 0);
+    hLayout->setContentsMargins(0, 0, 0, 0);
     hLayout->setSpacing(6);
 
     auto* titleLabel = new QLabel("Tệp media", header);
@@ -693,7 +693,7 @@ QWidget* AssetsPanel::createMediaView() {
     // 2. Content container
     auto* contentArea = new QWidget(view);
     auto* cLayout = new QVBoxLayout(contentArea);
-    cLayout->setContentsMargins(8, 8, 8, 8);
+    cLayout->setContentsMargins(0, 8, 0, 8);
     cLayout->setSpacing(0);
 
     // Empty state: MediaDragOverlay (matches web drag-overlay.tsx)
@@ -878,16 +878,16 @@ QWidget* AssetsPanel::createAudioView() {
     layout->setSpacing(8);
 
     auto* search=new QLineEdit(view);search->setObjectName("soundSearch");search->setPlaceholderText("Tìm kiếm…");search->setClearButtonEnabled(true);search->setFixedHeight(28);
-    auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(12,0,12,0);searchRow->addWidget(search);layout->addLayout(searchRow);
-    auto* tabs=new QWidget(view);auto* tabLayout=new QHBoxLayout(tabs);tabLayout->setContentsMargins(12,0,12,0);tabLayout->setSpacing(0);
+    auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(0,0,0,0);searchRow->addWidget(search);layout->addLayout(searchRow);
+    auto* tabs=new QWidget(view);auto* tabLayout=new QHBoxLayout(tabs);tabLayout->setContentsMargins(0,0,0,0);tabLayout->setSpacing(0);
     auto* libraryTab=new QPushButton("Hiệu ứng âm thanh",tabs);auto* savedTab=new QPushButton("Đã lưu",tabs);auto* voiceoverTab=new QPushButton("Thu âm",tabs);
     auto* tabGroup=new QButtonGroup(tabs);
     for(auto* b:{libraryTab,savedTab,voiceoverTab}){b->setCheckable(true);b->setFixedHeight(36);b->setProperty("class","browseTab");tabGroup->addButton(b);tabLayout->addWidget(b);}
     libraryTab->setChecked(true);tabLayout->addStretch();layout->addWidget(tabs);
     auto* notice=new QLabel("Thư viện âm thanh trực tuyến chưa được kết nối.",view);
-    notice->setProperty("class","sectionCaption");notice->setWordWrap(true);notice->setContentsMargins(12,8,12,8);layout->addWidget(notice);
+    notice->setProperty("class","sectionCaption");notice->setWordWrap(true);notice->setContentsMargins(0,8,0,8);layout->addWidget(notice);
     auto* localToggleRow=new QWidget(view);auto* localToggleLayout=new QHBoxLayout(localToggleRow);
-    localToggleLayout->setContentsMargins(12,0,12,0);
+    localToggleLayout->setContentsMargins(0,0,0,0);
     auto* localToggle=new QPushButton("Âm thử tổng hợp trên máy  ⌄",localToggleRow);localToggle->setCheckable(true);localToggle->setProperty("class","sectionToggle");localToggle->setFixedHeight(28);localToggleLayout->addWidget(localToggle);layout->addWidget(localToggleRow);
 
     auto* voiceoverScroll=new QScrollArea(view);
@@ -897,7 +897,7 @@ QWidget* AssetsPanel::createAudioView() {
     voiceoverScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* voiceoverContainer=new QWidget(voiceoverScroll);
     auto* voiceoverContainerLayout=new QVBoxLayout(voiceoverContainer);
-    voiceoverContainerLayout->setContentsMargins(12,0,12,8);
+    voiceoverContainerLayout->setContentsMargins(0,0,0,8);
     voiceoverContainerLayout->setSpacing(8);
     auto* voiceoverCard=new QWidget(voiceoverContainer);
     voiceoverCard->setProperty("class","cardWidget");
@@ -1039,7 +1039,7 @@ QWidget* AssetsPanel::createAudioView() {
     sfxScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* sfxContainer = new QWidget(sfxScroll);
     auto* sfxLayout = new QVBoxLayout(sfxContainer);
-    sfxLayout->setContentsMargins(12, 0, 12, 8);
+    sfxLayout->setContentsMargins(0, 0, 0, 8);
     sfxLayout->setSpacing(6);
 
     auto favoriteNames = std::make_shared<QSet<QString>>();
@@ -1224,7 +1224,7 @@ QWidget* AssetsPanel::createTextView() {
 
     auto* container = new QWidget(scroll);
     auto* cLayout = new QVBoxLayout(container);
-    cLayout->setContentsMargins(12, 12, 12, 12);
+    cLayout->setContentsMargins(0, 12, 0, 12);
     cLayout->setSpacing(10);
 
     auto* defaultText = new AssetTile("Văn bản mặc định",QPixmap(),112,false,container);
@@ -1233,7 +1233,7 @@ QWidget* AssetsPanel::createTextView() {
     defaultText->setToolTip("Thêm vào dòng thời gian");
     defaultText->setStyleSheet(QString("QPushButton {background:%1;border:none;border-radius:6px;font-size:12px;padding:0;} QPushButton:hover {border:1px solid %2;}").arg(Theme::instance().palette().hover.name(),Theme::instance().palette().primaryAccent.name()));
     connect(defaultText,&QPushButton::clicked,this,[this]{insertUiPreset(engine_,mediaLibrary_,QJsonObject{{"type","text"},{"name","Văn bản mặc định"}},engine_.playback().currentTime());});
-    cLayout->setContentsMargins(8,8,8,8); cLayout->setSpacing(8);
+    cLayout->setContentsMargins(0,8,0,8); cLayout->setSpacing(8);
     cLayout->addWidget(defaultText,0,Qt::AlignLeft);
     auto* extrasToggle = new QPushButton("Mẫu văn bản và giọng đọc  ⌄",container);
     extrasToggle->setObjectName("textExtrasToggle"); extrasToggle->setCheckable(true); extrasToggle->setFixedHeight(28);
@@ -1375,8 +1375,8 @@ QWidget* AssetsPanel::createStickersView() {
     auto* view=new QWidget(this);
     auto* root=new QVBoxLayout(view);root->setContentsMargins(0,8,0,0);root->setSpacing(8);
     auto* search=new QLineEdit(view);search->setObjectName("stickerSearch");search->setPlaceholderText("Tìm kiếm…");search->setClearButtonEnabled(true);search->setFixedHeight(28);
-    auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(8,0,8,0);searchRow->addWidget(search);root->addLayout(searchRow);
-    auto* tabs=new QWidget(view);auto* tabsLayout=new QHBoxLayout(tabs);tabsLayout->setContentsMargins(8,0,8,0);tabsLayout->setSpacing(0);
+    auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(0,0,0,0);searchRow->addWidget(search);root->addLayout(searchRow);
+    auto* tabs=new QWidget(view);auto* tabsLayout=new QHBoxLayout(tabs);tabsLayout->setContentsMargins(0,0,0,0);tabsLayout->setSpacing(0);
     auto* group=new QButtonGroup(tabs);
     for(const auto& title:{"Tất cả","Cờ","Hình dạng"}){auto* b=new QPushButton(QString::fromUtf8(title),tabs);b->setProperty("class","browseTab");b->setCheckable(true);b->setFixedHeight(36);group->addButton(b,group->buttons().size());tabsLayout->addWidget(b);}
     group->button(0)->setChecked(true);tabsLayout->addStretch();root->addWidget(tabs);
@@ -1384,7 +1384,7 @@ QWidget* AssetsPanel::createStickersView() {
     QFile countryFile(":/web/countries.ts");countryFile.open(QIODevice::ReadOnly);auto source=countryFile.readAll();const int start=source.indexOf('[',source.indexOf('=',source.indexOf("export const COUNTRIES")));
     const auto countries=QJsonDocument::fromJson(source.mid(start,source.lastIndexOf(']')-start+1)).array();
     auto rebuild=[this,search,scroll,group,countries] {
-        auto* content=new QWidget(scroll);auto* column=new QVBoxLayout(content);column->setContentsMargins(16,8,16,16);column->setSpacing(16);
+        auto* content=new QWidget(scroll);auto* column=new QVBoxLayout(content);column->setContentsMargins(0,8,0,16);column->setSpacing(16);
         const auto query=search->text().trimmed();const int category=group->checkedId();
         auto addHeading=[&](const QString& title,int tab){
             auto* row=new QWidget(content);auto* l=new QHBoxLayout(row);l->setContentsMargins(0,0,0,0);
@@ -1452,7 +1452,7 @@ QWidget* AssetsPanel::createEffectsView() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(createPanelHeaderWidget(view, "Hiệu ứng"));
-    auto* webPreview=new QWidget(view);auto* webPreviewLayout=new QVBoxLayout(webPreview);webPreviewLayout->setContentsMargins(8,8,8,0);
+    auto* webPreview=new QWidget(view);auto* webPreviewLayout=new QVBoxLayout(webPreview);webPreviewLayout->setContentsMargins(0,8,0,0);
     auto* blurTile=new AssetTile("Blur",QPixmap(":/web/effects/preview.jpg"),96,true,webPreview);
     blurTile->setObjectName("blurEffectTile");blurTile->setToolTip("Bộ dựng desktop chưa hỗ trợ hiệu ứng Blur");blurTile->setEnabled(false);
     connect(blurTile,&QPushButton::clicked,this,[this]{onApplyEffectPreset("Gaussian Blur");});
@@ -1465,7 +1465,7 @@ QWidget* AssetsPanel::createEffectsView() {
 
     auto* container = new QWidget(scroll);
     auto* cLayout = new QVBoxLayout(container);
-    cLayout->setContentsMargins(12, 12, 12, 12);
+    cLayout->setContentsMargins(0, 12, 0, 12);
     cLayout->setSpacing(8);
 
     struct EffectItem {
@@ -1529,11 +1529,11 @@ QWidget* AssetsPanel::createTransitionsView() {
     auto* layout = new QVBoxLayout(view);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto* notice=new QLabel("Fade vào/ra áp dụng trực tiếp lên clip đã chọn.",view);notice->setProperty("class","sectionCaption");notice->setContentsMargins(12,12,12,8);notice->setWordWrap(true);layout->addWidget(notice);
+    auto* notice=new QLabel("Fade vào/ra áp dụng trực tiếp lên clip đã chọn.",view);notice->setProperty("class","sectionCaption");notice->setContentsMargins(0,12,0,8);notice->setWordWrap(true);layout->addWidget(notice);
 
     auto* contentWidget = new QWidget(view);
     auto* cMainLayout = new QVBoxLayout(contentWidget);
-    cMainLayout->setContentsMargins(12, 12, 12, 12);
+    cMainLayout->setContentsMargins(0, 12, 0, 12);
     cMainLayout->setSpacing(10);
 
     auto* durBox = new QGroupBox("Thời lượng chuyển cảnh", contentWidget);
@@ -1671,7 +1671,7 @@ QWidget* AssetsPanel::createSubtitlesView() {
     actionLayout->addWidget(exportButton); actionLayout->addWidget(importButton);
     layout->addWidget(createPanelHeaderWidget(view,"Phụ đề",actions));
     auto* content = new QWidget(view);
-    auto* body = new QVBoxLayout(content); body->setContentsMargins(16,12,16,16); body->setSpacing(8);
+    auto* body = new QVBoxLayout(content); body->setContentsMargins(0,12,0,16); body->setSpacing(8);
     body->addWidget(new QLabel("Ngôn ngữ",content));
     auto* language = new WebComboBox(content); language->setObjectName("captionLanguage");
     language->setToolTip("Chọn ngôn ngữ"); language->setFixedHeight(28);
@@ -1895,7 +1895,7 @@ QWidget* AssetsPanel::createAdjustmentView() {
     auto* layout = new QVBoxLayout(view);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto* notice=new QLabel("Chế độ điều chỉnh sắp ra mắt…",view);notice->setProperty("class","sectionCaption");notice->setContentsMargins(16,16,16,8);notice->setWordWrap(true);layout->addWidget(notice);
+    auto* notice=new QLabel("Chế độ điều chỉnh sắp ra mắt…",view);notice->setProperty("class","sectionCaption");notice->setContentsMargins(0,16,0,8);notice->setWordWrap(true);layout->addWidget(notice);
     auto* extrasToggle=new QPushButton("Công cụ desktop  ⌄",view);extrasToggle->setProperty("class","sectionToggle");extrasToggle->setCheckable(true);extrasToggle->setFixedHeight(28);layout->addWidget(extrasToggle);
 
     auto* scroll = new QScrollArea(view);
@@ -1903,7 +1903,7 @@ QWidget* AssetsPanel::createAdjustmentView() {
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* container = new QWidget(scroll);
     auto* cLayout = new QVBoxLayout(container);
-    cLayout->setContentsMargins(12, 12, 12, 12);
+    cLayout->setContentsMargins(0, 12, 0, 12);
     cLayout->setSpacing(8);
 
     auto makeSliderRow = [container](const QString& title, int min, int max, int def) -> std::pair<QSlider*, QLabel*> {
@@ -2009,7 +2009,7 @@ QWidget* AssetsPanel::createSettingsView() {
     tabs->setObjectName("settingsTabs");
     tabs->setFixedHeight(44);
     auto* tabsLayout = new QHBoxLayout(tabs);
-    tabsLayout->setContentsMargins(8,0,8,0);
+    tabsLayout->setContentsMargins(0,0,0,0);
     tabsLayout->setSpacing(4);
     auto* infoTab = new QPushButton("Thông tin dự án", tabs);
     auto* backgroundTab = new QPushButton("Nền", tabs);
@@ -2030,7 +2030,7 @@ QWidget* AssetsPanel::createSettingsView() {
 
     auto* container = new QWidget(scroll);
     auto* cLayout = new QVBoxLayout(container);
-    cLayout->setContentsMargins(8,0,8,0);
+    cLayout->setContentsMargins(0,0,0,0);
     cLayout->setSpacing(0);
     auto* pages = new QStackedWidget(container);
     auto* infoPage = new QWidget(pages);
@@ -2039,7 +2039,7 @@ QWidget* AssetsPanel::createSettingsView() {
     auto addRow = [infoPage,infoLayout](const QString& title,QWidget* control) {
         auto* row = new QWidget(infoPage); row->setProperty("class","webSectionRow");
         row->setFixedHeight(44);
-        auto* l = new QHBoxLayout(row); l->setContentsMargins(14,0,14,0);
+        auto* l = new QHBoxLayout(row); l->setContentsMargins(0,0,0,0);
         auto* label = new QLabel(title,row); label->setProperty("class","sectionCaption");
         l->addWidget(label); l->addStretch(); l->addWidget(control);
         infoLayout->addWidget(row);
@@ -2090,7 +2090,7 @@ QWidget* AssetsPanel::createSettingsView() {
     aLayout->addWidget(ratioHeader);
     auto* ratioContent = new QWidget(aspectGroup);
     auto* ratioLayout = new QVBoxLayout(ratioContent);
-    ratioLayout->setContentsMargins(8,0,8,0); ratioLayout->setSpacing(4);
+    ratioLayout->setContentsMargins(0,0,0,0); ratioLayout->setSpacing(4);
     aLayout->addWidget(ratioContent);
     connect(ratioHeader,&QPushButton::toggled,ratioContent,&QWidget::setVisible);
     auto* ratioButtons = new QButtonGroup(aspectGroup);
@@ -2167,7 +2167,7 @@ QWidget* AssetsPanel::createSettingsView() {
         auto* header=new SectionToggle(name,section);header->setProperty("class","sectionToggle");header->setChecked(open);
         l->addWidget(header);l->addWidget(body);body->setVisible(open);connect(header,&QPushButton::toggled,body,&QWidget::setVisible);backgroundLayout->addWidget(section);
     };
-    auto* blurBody=new QWidget(backgroundPage);auto* blurColumn=new QVBoxLayout(blurBody);blurColumn->setContentsMargins(16,0,16,16);
+    auto* blurBody=new QWidget(backgroundPage);auto* blurColumn=new QVBoxLayout(blurBody);blurColumn->setContentsMargins(0,0,0,16);
     auto* blurTiles=new QWidget(blurBody);auto* blurLayout=new FlowLayout(blurTiles);blurColumn->addWidget(blurTiles);
     const QPixmap source(":/web/effects/preview.jpg");
     for(const auto& title:{"Nhẹ","Trung bình","Mạnh"}) {
@@ -2176,7 +2176,7 @@ QWidget* AssetsPanel::createSettingsView() {
         blurLayout->addWidget(tile);
     }
     addSection("Làm mờ",blurBody,true);
-    auto* colorsBody=new QWidget(backgroundPage);auto* colorsColumn=new QVBoxLayout(colorsBody);colorsColumn->setContentsMargins(16,0,16,16);
+    auto* colorsBody=new QWidget(backgroundPage);auto* colorsColumn=new QVBoxLayout(colorsBody);colorsColumn->setContentsMargins(0,0,0,16);
     auto* swatches=new QWidget(colorsBody);auto* colorsLayout=new FlowLayout(swatches);
     auto* pick=new QPushButton("＋",swatches);pick->setFixedSize(80,80);pick->setToolTip("Chọn màu nền tùy chỉnh");
     pick->setStyleSheet("QPushButton {background:qconicalgradient(cx:0.5,cy:0.5,angle:180,stop:0 #ff5e5e,stop:0.2 #fff26b,stop:0.4 #6bff8f,stop:0.6 #5ee7ff,stop:0.8 #d76bff,stop:1 #ff5e5e);font-size:24px;color:white;border:1px solid #bfc0c1;border-radius:6px;}");
@@ -2193,7 +2193,7 @@ QWidget* AssetsPanel::createSettingsView() {
     colorsColumn->addWidget(swatches);addSection("Màu sắc",colorsBody,false);
     for(const auto& title:{"Họa tiết","Syntax UI"}) {
         auto* message=new QLabel("Bộ dựng nền này chưa được hỗ trợ trong bản desktop.",backgroundPage);
-        message->setWordWrap(true);message->setContentsMargins(16,0,16,16);message->setProperty("class","sectionCaption");
+        message->setWordWrap(true);message->setContentsMargins(0,0,0,16);message->setProperty("class","sectionCaption");
         addSection(QString::fromUtf8(title),message,false);
     }
     backgroundLayout->addStretch();pages->addWidget(backgroundPage);
