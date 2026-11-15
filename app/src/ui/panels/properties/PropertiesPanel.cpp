@@ -5,6 +5,9 @@
 #include "ui/widgets/BalancedScrollMargins.h"
 #include "editor/history/commands/ElementCommands.h"
 #include "editor/history/commands/EffectCommands.h"
+#include "editor/history/commands/KeyframeCommands.h"
+#include "editor/history/commands/EffectKeyframeCommands.h"
+#include "editor/animation/EffectParamAnimationEngine.h"
 #include <QHBoxLayout>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
@@ -17,6 +20,7 @@
 #include <QLabel>
 #include <QPainter>
 #include <QSignalBlocker>
+#include <QTimer>
 #include <algorithm>
 #include <cmath>
 
@@ -113,23 +117,68 @@ void PropertiesPanel::setupUi() {
     balanceScrollContentMargins(scrollArea_);
     row->addWidget(scrollArea_,1); root->addWidget(inspectorView_,1);
     content->setStyleSheet(QString("QDoubleSpinBox,QLineEdit,QTextEdit{background:%1;border:1px solid transparent;border-radius:10px;padding:4px 10px;min-width:0px;} QDoubleSpinBox:focus,QLineEdit:focus,QTextEdit:focus{border-color:%2;}").arg(pal.hover.name(),pal.primaryAccent.name()));
-    auto field=[&](QVBoxLayout* layout,const QString& label,QWidget* control) {
+    auto field=[&](QVBoxLayout* layout,const QString& label,QWidget* control,QPushButton* keyframeToggle=nullptr) {
         auto* wrapper=new QWidget;auto* fields=new QVBoxLayout(wrapper);fields->setContentsMargins(0,0,0,0);fields->setSpacing(8);
-        if(!label.isEmpty()) { auto* caption=new QLabel(label);caption->setProperty("propertyCaption",true); caption->setStyleSheet(QString("color:%1;font-size:12px;").arg(pal.textSecondary.name())); fields->addWidget(caption); }
+        if(!label.isEmpty()) {
+            auto* caption=new QLabel(label);caption->setProperty("propertyCaption",true); caption->setStyleSheet(QString("color:%1;font-size:12px;").arg(pal.textSecondary.name()));
+            if(keyframeToggle) {
+                auto* labelRow=new QWidget(wrapper);auto* rowLayout=new QHBoxLayout(labelRow);
+                rowLayout->setContentsMargins(0,0,0,0);rowLayout->setSpacing(4);
+                rowLayout->addWidget(keyframeToggle);rowLayout->addWidget(caption,1);fields->addWidget(labelRow);
+            } else fields->addWidget(caption);
+        }
         fields->addWidget(control);layout->addWidget(wrapper);control->setMinimumWidth(0);
         control->setSizePolicy(QSizePolicy::Ignored,control->sizePolicy().verticalPolicy());
         wrapper->setMinimumWidth(0);wrapper->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
     };
-    auto number=[&](QVBoxLayout* layout,const QString& label,const char* key,double def,double min,double max,double step,double multiplier=1.) -> QDoubleSpinBox* {
+    auto number=[&](QVBoxLayout* layout,const QString& label,const char* key,double def,double min,double max,double step,double multiplier=1.,bool keyframable=false) -> QDoubleSpinBox* {
         auto* spin=new QDoubleSpinBox; spin->setObjectName(QString("property_")+key); spin->setRange(min,max); spin->setSingleStep(step);
         spin->setDecimals(step<1?2:0); spin->setButtonSymbols(QAbstractSpinBox::NoButtons); spin->setFixedHeight(28); spin->setKeyboardTracking(false);
-        field(layout,label,spin);
+        QPushButton* keyframeToggle=nullptr;
+        if(keyframable) {
+            keyframeToggle=new QPushButton(QStringLiteral("◇"));
+            keyframeToggle->setObjectName(QStringLiteral("keyframe_")+key);
+            keyframeToggle->setFixedSize(20,20);keyframeToggle->setFlat(true);
+            keyframeToggle->setAccessibleName(QStringLiteral("Keyframe: ")+label);
+            keyframeToggle->setFocusPolicy(Qt::StrongFocus);
+        }
+        field(layout,label,spin,keyframeToggle);
         readers_.push_back([spin,key=std::string(key),def,multiplier](const editor::Clip& clip){
             QSignalBlocker guard(spin);double value=clip.getParam<double>(key,def);
             if(key=="volume"&&clip.getParam<std::string>("audio.volumeUnit","")!="db"&&value>0&&value<=2)value=20*std::log10(value);
             spin->setValue(value*multiplier);
         });
-        connect(spin,&QDoubleSpinBox::valueChanged,this,[this,key=std::string(key),multiplier](double value) { patch({{key,value/multiplier}}); });
+        if(keyframable) {
+            auto reader=[this,spin,keyframeToggle,key=std::string(key),label,multiplier](const editor::Clip& clip){
+                const auto localTime=localPlayheadTime(clip);
+                const auto propertyPath=animationPathForClip(clip,key);
+                const auto* channel=localTime&&propertyPath?clip.findAnimationChannel(*propertyPath):nullptr;
+                const bool hasAnimatedValue=channel&&!channel->empty();
+                if(hasAnimatedValue) {
+                    QSignalBlocker guard(spin);
+                    spin->setValue(channel->getValueAt(*localTime)*multiplier);
+                }
+                const bool inRange=localTime.has_value();
+                const bool active=inRange&&channel&&channel->findKeyframeAt(*localTime).has_value();
+                const auto& palette=Theme::instance().palette();
+                const QString style=QString("QPushButton{border:none;padding:0;background:transparent;color:%1;font-size:15px;} QPushButton:hover{background:%2;border-radius:4px;} QPushButton:disabled{color:%3;}")
+                    .arg(active?palette.primaryAccent.name():palette.textSecondary.name(),palette.hover.name(),palette.textSecondary.name());
+                if(keyframeToggle->styleSheet()!=style)keyframeToggle->setStyleSheet(style);
+                const QString glyph=active?QStringLiteral("◆"):QStringLiteral("◇");
+                if(keyframeToggle->text()!=glyph)keyframeToggle->setText(glyph);
+                if(keyframeToggle->isEnabled()!=inRange)keyframeToggle->setEnabled(inRange);
+                const QString tip=active?QStringLiteral("Xóa keyframe: %1").arg(label):QStringLiteral("Thêm keyframe: %1").arg(label);
+                if(keyframeToggle->toolTip()!=tip)keyframeToggle->setToolTip(tip);
+                if(keyframeToggle->accessibleName()!=tip)keyframeToggle->setAccessibleName(tip);
+            };
+            animatedReaders_.push_back(reader);
+        }
+        connect(spin,&QDoubleSpinBox::valueChanged,this,[this,key=std::string(key),multiplier,keyframable](double value) {
+            const double resolved=value/multiplier;
+            if(keyframable)setNumericPropertyValue(key,resolved);
+            else patch({{key,resolved}});
+        });
+        if(keyframeToggle)connect(keyframeToggle,&QPushButton::clicked,this,[this,key=std::string(key),spin,multiplier]{toggleNumericKeyframe(key,spin->value()/multiplier);});
         return spin;
     };
     auto select=[&](QVBoxLayout* layout,const QString& label,const char* key,const QStringList& names,const QStringList& values,const QString& def) {
@@ -165,13 +214,13 @@ void PropertiesPanel::setupUi() {
     auto* tts=addTab("tts","Chuyển văn bản thành giọng nói",UiIcon::Audio);
     auto* ttsInfo=new QLabel("Chưa kết nối bộ tổng hợp giọng nói. Không tạo âm thanh giả thay lời đọc."); ttsInfo->setWordWrap(true);tts->addWidget(ttsInfo);
     auto* transform=addTab("transform","Biến đổi",UiIcon::Transform);
-    number(transform,"Vị trí X","transform.positionX",0,-100000,100000,1);
-    number(transform,"Vị trí Y","transform.positionY",0,-100000,100000,1);
-    number(transform,"Tỷ lệ X","transform.scaleX",1,.01,10000,.1,100);
-    number(transform,"Tỷ lệ Y","transform.scaleY",1,.01,10000,.1,100);
-    number(transform,"Xoay","transform.rotate",0,-360,360,1);
+    number(transform,"Vị trí X","transform.positionX",0,-100000,100000,1,1.,true);
+    number(transform,"Vị trí Y","transform.positionY",0,-100000,100000,1,1.,true);
+    number(transform,"Tỷ lệ X","transform.scaleX",1,.01,10000,.1,100,true);
+    number(transform,"Tỷ lệ Y","transform.scaleY",1,.01,10000,.1,100,true);
+    number(transform,"Xoay","transform.rotate",0,-360,360,1,1.,true);
     auto* audio=addTab("audio","Âm thanh",UiIcon::Music);
-    number(audio,"Âm lượng","volume",0,-60,12,.1);
+    number(audio,"Âm lượng","volume",0,-60,12,.1,1.,true);
     auto* mute=new ToggleSwitch(content);mute->setObjectName("property_muted");field(audio,"Tắt tiếng",mute);
     readers_.push_back([mute](const editor::Clip& c){QSignalBlocker guard(mute);mute->setChecked(c.isMuted()||c.getParam<bool>("muted",false));});
     connect(mute,&QCheckBox::toggled,this,[this](bool v){patch({{"muted",v}},v);});
@@ -181,7 +230,7 @@ void PropertiesPanel::setupUi() {
     readers_.push_back([reverse](const editor::Clip& c){QSignalBlocker guard(reverse);reverse->setChecked(c.getParam<bool>("reversed",false));});
     connect(reverse,&QCheckBox::toggled,this,[this](bool v){patch({{"reversed",v}});});
     auto* blend=addTab("blending","Hòa trộn",UiIcon::Drop);
-    number(blend,"Độ mờ","opacity",1,0,100,1,100);
+    number(blend,"Độ mờ","opacity",1,0,100,1,100,true);
     select(blend,"Chế độ hòa trộn","transform.blendModeName",{"Bình thường","Nhân","Màn hình","Phủ","Làm tối","Làm sáng","Né màu"},{"normal","multiply","screen","overlay","darken","lighten","color_dodge"},"normal");
     auto* graphic=addTab("graphic","Hình dạng",UiIcon::ShapeRect);
     select(graphic,"Hình dạng","graphic.shape",{"Chữ nhật","Tròn","Ngũ giác","Ngôi sao","Mũi tên"},{"rectangle","circle","polygon","star","arrow"},"rectangle");
@@ -239,26 +288,26 @@ void PropertiesPanel::setupUi() {
             QColor color(QString::fromStdString(value));QPixmap swatch(16,16);swatch.fill(color);button->setIcon(QIcon(swatch));button->setText(color.name().mid(1).toUpper());button->setProperty("color",color);
         });
     };
-    auto* blurIntensity=number(effects,"Cường độ mờ","effect.intensity",15,0,100,1);bindEffectNumber(blurIntensity,"intensity",15);
+    auto* blurIntensity=number(effects,"Cường độ mờ","effect.intensity",15,0,100,1,1.,true);bindEffectNumber(blurIntensity,"intensity",15);
     auto* blurIntensityRow=blurIntensity->parentWidget();
     readers_.push_back([this,blurIntensityRow](const editor::Clip& c){
         const auto* selected=selectedEffect(c,selectedEffectId_);const auto effectName=selected?effectDisplayName(selected->type):QString::fromStdString(c.getParam<std::string>("effect.name",""));
         blurIntensityRow->setVisible(effectName.contains("blur",Qt::CaseInsensitive)||effectName.contains("mờ",Qt::CaseInsensitive));
     });
-    auto* sharpenAmount=number(effects,"Mức độ tăng nét","effect.amount",0.35,0,2,0.05);bindEffectNumber(sharpenAmount,"amount",0.35);
+    auto* sharpenAmount=number(effects,"Mức độ tăng nét","effect.amount",0.35,0,2,0.05,1.,true);bindEffectNumber(sharpenAmount,"amount",0.35);
     auto* sharpenAmountRow=sharpenAmount->parentWidget();
     readers_.push_back([this,sharpenAmountRow](const editor::Clip& c){
         const auto* selected=selectedEffect(c,selectedEffectId_);const auto effectName=selected?effectDisplayName(selected->type):QString::fromStdString(c.getParam<std::string>("effect.name",""));
         sharpenAmountRow->setVisible(effectName.contains("sharpen",Qt::CaseInsensitive)||effectName.contains("làm nét",Qt::CaseInsensitive));
     });
-    auto* gradeBrightness=number(effects,"Độ sáng","effect.brightness",0,-1,1,0.01);bindEffectNumber(gradeBrightness,"brightness",0);
-    auto* gradeContrast=number(effects,"Độ tương phản","effect.contrast",0,-1,1,0.01);bindEffectNumber(gradeContrast,"contrast",0);
-    auto* gradeSaturation=number(effects,"Độ bão hòa","effect.saturation",0,-1,2,0.01);bindEffectNumber(gradeSaturation,"saturation",0);
-    auto* gradeExposure=number(effects,"Phơi sáng","effect.exposure",0,-4,4,0.1);bindEffectNumber(gradeExposure,"exposure",0);
-    auto* gradeTemperature=number(effects,"Nhiệt độ màu","effect.temperature",0,-1,1,0.01);bindEffectNumber(gradeTemperature,"temperature",0);
-    auto* gradeTint=number(effects,"Sắc độ","effect.tint",0,-1,1,0.01);bindEffectNumber(gradeTint,"tint",0);
-    auto* gradeHue=number(effects,"Dịch chuyển sắc độ","effect.hue",0,-180,180,1);bindEffectNumber(gradeHue,"hue",0);
-    auto* gradeGamma=number(effects,"Gamma","effect.gamma",1,0.1,3,0.01);bindEffectNumber(gradeGamma,"gamma",1);
+    auto* gradeBrightness=number(effects,"Độ sáng","effect.brightness",0,-1,1,0.01,1.,true);bindEffectNumber(gradeBrightness,"brightness",0);
+    auto* gradeContrast=number(effects,"Độ tương phản","effect.contrast",0,-1,1,0.01,1.,true);bindEffectNumber(gradeContrast,"contrast",0);
+    auto* gradeSaturation=number(effects,"Độ bão hòa","effect.saturation",0,-1,2,0.01,1.,true);bindEffectNumber(gradeSaturation,"saturation",0);
+    auto* gradeExposure=number(effects,"Phơi sáng","effect.exposure",0,-4,4,0.1,1.,true);bindEffectNumber(gradeExposure,"exposure",0);
+    auto* gradeTemperature=number(effects,"Nhiệt độ màu","effect.temperature",0,-1,1,0.01,1.,true);bindEffectNumber(gradeTemperature,"temperature",0);
+    auto* gradeTint=number(effects,"Sắc độ","effect.tint",0,-1,1,0.01,1.,true);bindEffectNumber(gradeTint,"tint",0);
+    auto* gradeHue=number(effects,"Dịch chuyển sắc độ","effect.hue",0,-180,180,1,1.,true);bindEffectNumber(gradeHue,"hue",0);
+    auto* gradeGamma=number(effects,"Gamma","effect.gamma",1,0.1,3,0.01,1.,true);bindEffectNumber(gradeGamma,"gamma",1);
     const std::vector<QWidget*> colorGradeRows{
         gradeBrightness->parentWidget(), gradeContrast->parentWidget(), gradeSaturation->parentWidget(),
         gradeExposure->parentWidget(), gradeTemperature->parentWidget(), gradeTint->parentWidget(),
@@ -268,10 +317,10 @@ void PropertiesPanel::setupUi() {
         const bool isColorGrading=effectName.contains("color grading",Qt::CaseInsensitive);
         for(auto* row:colorGradeRows)row->setVisible(isColorGrading);
     });
-    auto* vignetteAmount=number(effects,"Độ tối viền","effect.amount",0.45,0,1,0.01);bindEffectNumber(vignetteAmount,"amount",0.45);
+    auto* vignetteAmount=number(effects,"Độ tối viền","effect.amount",0.45,0,1,0.01,1.,true);bindEffectNumber(vignetteAmount,"amount",0.45);
     vignetteAmount->setObjectName("property_effect_vignette_amount");
-    auto* vignetteSoftness=number(effects,"Độ mềm","effect.softness",0.55,0.01,1,0.01);bindEffectNumber(vignetteSoftness,"softness",0.55);
-    auto* vignetteRoundness=number(effects,"Độ tròn","effect.roundness",1.0,0,1,0.01);bindEffectNumber(vignetteRoundness,"roundness",1.0);
+    auto* vignetteSoftness=number(effects,"Độ mềm","effect.softness",0.55,0.01,1,0.01,1.,true);bindEffectNumber(vignetteSoftness,"softness",0.55);
+    auto* vignetteRoundness=number(effects,"Độ tròn","effect.roundness",1.0,0,1,0.01,1.,true);bindEffectNumber(vignetteRoundness,"roundness",1.0);
     const std::vector<QWidget*> vignetteRows{
         vignetteAmount->parentWidget(),vignetteSoftness->parentWidget(),vignetteRoundness->parentWidget()};
     readers_.push_back([this,vignetteRows](const editor::Clip& c){
@@ -282,11 +331,11 @@ void PropertiesPanel::setupUi() {
     });
     auto* keyColor=color(effects,"Màu cần xóa","effect.keyColor","#00FF00");bindEffectColor(keyColor,"keyColor","#00FF00");
     auto* keyColorRow=keyColor->parentWidget();
-    auto* similarity=number(effects,"Độ tương đồng","effect.similarity",0.4,0.01,1.0,0.01);bindEffectNumber(similarity,"similarity",0.4);
+    auto* similarity=number(effects,"Độ tương đồng","effect.similarity",0.4,0.01,1.0,0.01,1.,true);bindEffectNumber(similarity,"similarity",0.4);
     auto* similarityRow=similarity->parentWidget();
-    auto* smoothness=number(effects,"Độ mềm cạnh","effect.smoothness",0.1,0.001,1.0,0.001);bindEffectNumber(smoothness,"smoothness",0.1);
+    auto* smoothness=number(effects,"Độ mềm cạnh","effect.smoothness",0.1,0.001,1.0,0.001,1.,true);bindEffectNumber(smoothness,"smoothness",0.1);
     auto* smoothnessRow=smoothness->parentWidget();
-    auto* spill=number(effects,"Khử tràn màu","effect.spill",0.1,0.0,1.0,0.01);bindEffectNumber(spill,"spill",0.1);
+    auto* spill=number(effects,"Khử tràn màu","effect.spill",0.1,0.0,1.0,0.01,1.,true);bindEffectNumber(spill,"spill",0.1);
     auto* spillRow=spill->parentWidget();
     readers_.push_back([this,keyColorRow,similarityRow,smoothnessRow,spillRow](const editor::Clip& c){
         const auto* selected=selectedEffect(c,selectedEffectId_);const auto effectName=selected?effectDisplayName(selected->type):QString::fromStdString(c.getParam<std::string>("effect.name",""));
@@ -296,6 +345,94 @@ void PropertiesPanel::setupUi() {
         smoothnessRow->setVisible(isChromaKey);
         spillRow->setVisible(isChromaKey);
     });
+
+    auto* animatedRefreshTimer=new QTimer(this);
+    animatedRefreshTimer->setInterval(33);
+    connect(animatedRefreshTimer,&QTimer::timeout,this,&PropertiesPanel::refreshAnimatedProperties);
+    animatedRefreshTimer->start();
+}
+std::optional<core::TimelineTime> PropertiesPanel::localPlayheadTime(const editor::Clip& clip) const {
+    const auto playhead=engine_.playback().currentTime();
+    if(playhead<clip.startTime()||playhead>=clip.endTime())return std::nullopt;
+    return playhead-clip.startTime();
+}
+std::optional<std::string> PropertiesPanel::animationPathForClip(const editor::Clip& clip,const std::string& property) const {
+    if(property.rfind("effect.",0)==0) {
+        const auto* effect=selectedEffect(clip,selectedEffectId_);
+        if(!effect)return std::nullopt;
+        return editor::EffectParamAnimationEngine::buildEffectParamPath(effect->id,property.substr(7));
+    }
+    return property;
+}
+void PropertiesPanel::setNumericPropertyValue(const std::string& property,double value) {
+    if(isUpdatingUi_||engine_.selectedClips().size()!=1)return;
+    auto* timeline=engine_.activeTimeline();if(!timeline)return;
+    const auto clipId=engine_.selectedClips().front();const auto* clip=timeline->findClip(clipId);if(!clip)return;
+    const auto localTime=localPlayheadTime(*clip);
+    const auto propertyPath=animationPathForClip(*clip,property);
+    const auto* channel=localTime&&propertyPath?clip->findAnimationChannel(*propertyPath):nullptr;
+    if(localTime&&propertyPath&&channel&&!channel->empty()) {
+        const auto* track=timeline->findTrackContainingClip(clipId);if(!track)return;
+        std::unique_ptr<editor::EditorCommand> command;
+        if(property.rfind("effect.",0)==0) {
+            if(const auto* effect=selectedEffect(*clip,selectedEffectId_)) {
+                command=std::make_unique<editor::UpsertEffectParamKeyframeCommand>(
+                    *timeline,track->id(),clipId,effect->id,property.substr(7),*localTime,value);
+            }
+        } else {
+            command=std::make_unique<editor::UpsertKeyframeCommand>(
+                *timeline,track->id(),clipId,*propertyPath,*localTime,value);
+        }
+        if(command&&engine_.history().execute(std::move(command))) {
+            engine_.project().setDirty(true);engine_.notifyTimelineChanged();
+            lastAnimatedUiTimeTicks_=-1;refresh();
+        }
+        return;
+    }
+    patch({{property,value}});
+}
+void PropertiesPanel::toggleNumericKeyframe(const std::string& property,double value) {
+    if(isUpdatingUi_||engine_.selectedClips().size()!=1)return;
+    auto* timeline=engine_.activeTimeline();if(!timeline)return;
+    const auto clipId=engine_.selectedClips().front();const auto* clip=timeline->findClip(clipId);if(!clip)return;
+    const auto localTime=localPlayheadTime(*clip);if(!localTime)return;
+    const auto propertyPath=animationPathForClip(*clip,property);if(!propertyPath)return;
+    const auto* track=timeline->findTrackContainingClip(clipId);if(!track)return;
+    const auto* channel=clip->findAnimationChannel(*propertyPath);
+    const bool hasKeyframe=channel&&channel->findKeyframeAt(*localTime).has_value();
+    std::unique_ptr<editor::EditorCommand> command;
+    if(property.rfind("effect.",0)==0) {
+        const auto* effect=selectedEffect(*clip,selectedEffectId_);if(!effect)return;
+        if(hasKeyframe) {
+            command=std::make_unique<editor::RemoveEffectParamKeyframeCommand>(
+                *timeline,track->id(),clipId,effect->id,property.substr(7),*localTime);
+        } else {
+            command=std::make_unique<editor::UpsertEffectParamKeyframeCommand>(
+                *timeline,track->id(),clipId,effect->id,property.substr(7),*localTime,value);
+        }
+    } else if(hasKeyframe) {
+        command=std::make_unique<editor::RemoveKeyframeCommand>(
+            *timeline,track->id(),clipId,*propertyPath,*localTime);
+    } else {
+        command=std::make_unique<editor::UpsertKeyframeCommand>(
+            *timeline,track->id(),clipId,*propertyPath,*localTime,value);
+    }
+    if(command&&engine_.history().execute(std::move(command))) {
+        engine_.project().setDirty(true);engine_.notifyTimelineChanged();
+        lastAnimatedUiTimeTicks_=-1;refresh();
+    }
+}
+void PropertiesPanel::refreshAnimatedProperties() {
+    auto* timeline=engine_.activeTimeline();
+    if(!timeline||engine_.selectedClips().size()!=1)return;
+    const auto* clip=timeline->findClip(engine_.selectedClips().front());if(!clip)return;
+    const auto now=engine_.playback().currentTime();
+    const auto clipId=clip->id().str();
+    if(lastAnimatedUiTimeTicks_==now.ticks()&&lastAnimatedUiClipId_==clipId)return;
+    lastAnimatedUiTimeTicks_=now.ticks();lastAnimatedUiClipId_=clipId;
+    const bool wasUpdating=isUpdatingUi_;isUpdatingUi_=true;
+    for(const auto& read:animatedReaders_)read(*clip);
+    isUpdatingUi_=wasUpdating;
 }
 void PropertiesPanel::selectTab(const QString& key) {
     if(!tabs_.count(key))return;
@@ -350,7 +487,7 @@ void PropertiesPanel::refresh() {
     }
     QString tab=rememberedTabs_.count(clip->type())?rememberedTabs_[clip->type()]:visible.front();
     if(std::find(visible.begin(),visible.end(),tab)==visible.end())tab=visible.front();
-    selectTab(tab);for(const auto& read:readers_)read(*clip);isUpdatingUi_=false;
+    selectTab(tab);for(const auto& read:readers_)read(*clip);isUpdatingUi_=false;lastAnimatedUiTimeTicks_=-1;refreshAnimatedProperties();
 }
 void PropertiesPanel::patch(const nlohmann::json& values,std::optional<bool> muted) {
     if(isUpdatingUi_||engine_.selectedClips().size()!=1)return;
