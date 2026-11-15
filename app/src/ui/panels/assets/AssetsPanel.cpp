@@ -790,26 +790,29 @@ QWidget* AssetsPanel::createMediaView() {
 QWidget* AssetsPanel::createAudioView() {
     auto* view = new QWidget(this);
     auto* layout = new QVBoxLayout(view);
-    layout->setContentsMargins(0,8,0,0);
+    // Keep the audio panel controls on the same horizontal inset.
+    layout->setContentsMargins(12,8,12,0);
     layout->setSpacing(8);
 
     auto* search=new QLineEdit(view);search->setObjectName("soundSearch");search->setPlaceholderText("Tìm kiếm…");search->setClearButtonEnabled(true);search->setFixedHeight(28);
-    auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(8,0,8,0);searchRow->addWidget(search);layout->addLayout(searchRow);
-    auto* tabs=new QWidget(view);auto* tabLayout=new QHBoxLayout(tabs);tabLayout->setContentsMargins(8,0,8,0);tabLayout->setSpacing(0);
+    auto* searchRow=new QHBoxLayout();searchRow->setContentsMargins(0,0,0,0);searchRow->addWidget(search);layout->addLayout(searchRow);
+    auto* tabs=new QWidget(view);auto* tabLayout=new QHBoxLayout(tabs);tabLayout->setContentsMargins(0,0,0,0);tabLayout->setSpacing(0);
     auto* libraryTab=new QPushButton("Hiệu ứng âm thanh",tabs);auto* savedTab=new QPushButton("Đã lưu",tabs);
     auto* tabGroup=new QButtonGroup(tabs);
     for(auto* b:{libraryTab,savedTab}){b->setCheckable(true);b->setFixedHeight(36);b->setProperty("class","browseTab");tabGroup->addButton(b);tabLayout->addWidget(b);}
     libraryTab->setChecked(true);tabLayout->addStretch();layout->addWidget(tabs);
     auto* notice=new QLabel("Thư viện âm thanh trực tuyến chưa được kết nối.",view);
-    notice->setProperty("class","sectionCaption");notice->setWordWrap(true);notice->setContentsMargins(16,8,16,8);layout->addWidget(notice);
+    notice->setProperty("class","sectionCaption");notice->setWordWrap(true);notice->setContentsMargins(0,8,0,8);layout->addWidget(notice);
     auto* localToggle=new QPushButton("Âm thử tổng hợp trên máy  ⌄",view);localToggle->setCheckable(true);localToggle->setProperty("class","sectionToggle");localToggle->setFixedHeight(28);layout->addWidget(localToggle);
 
     auto* sfxScroll = new QScrollArea(view);
     sfxScroll->setWidgetResizable(true);
     sfxScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Wheel and trackpad scrolling remain available without a reserved gutter.
+    sfxScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* sfxContainer = new QWidget(sfxScroll);
     auto* sfxLayout = new QVBoxLayout(sfxContainer);
-    sfxLayout->setContentsMargins(0, 0, 4, 0);
+    sfxLayout->setContentsMargins(0, 0, 0, 8);
     sfxLayout->setSpacing(6);
 
     struct SfxEntry {
@@ -1186,7 +1189,7 @@ QWidget* AssetsPanel::createTransitionsView() {
     auto* layout = new QVBoxLayout(view);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto* notice=new QLabel("Chế độ chuyển cảnh sắp ra mắt…",view);notice->setProperty("class","sectionCaption");notice->setContentsMargins(16,16,16,8);notice->setWordWrap(true);layout->addWidget(notice);
+    auto* notice=new QLabel("Chế độ chuyển cảnh sắp ra mắt…",view);notice->setProperty("class","sectionCaption");notice->setContentsMargins(12,12,12,8);notice->setWordWrap(true);layout->addWidget(notice);
     auto* extrasToggle=new QPushButton("Công cụ desktop  ⌄",view);extrasToggle->setProperty("class","sectionToggle");extrasToggle->setCheckable(true);extrasToggle->setFixedHeight(28);layout->addWidget(extrasToggle);
 
     auto* contentWidget = new QWidget(view);
