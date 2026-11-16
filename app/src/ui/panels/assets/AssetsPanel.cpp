@@ -411,12 +411,13 @@ void AssetsPanel::setupUi() {
 
     viewsStack_ = new QStackedWidget(this);
     viewsStack_->setContentsMargins(0, 0, 0, 0);
-    constexpr int kPageHorizontalInset = 16;
-    if (auto* stackLayout = viewsStack_->layout()) {
-        const QMargins margins = stackLayout->contentsMargins();
-        stackLayout->setContentsMargins(kPageHorizontalInset, margins.top(),
-                                        kPageHorizontalInset, margins.bottom());
-    }
+    constexpr int kPageHorizontalInset = 12;
+    // QStackedLayout fills the stack's contentsRect. Put the shared inset on
+    // the widget itself so every page gets the same real left/right boundary.
+    // Relying on QStackedLayout margins here left some Qt/WASM pages flush to
+    // the tab rail despite the configured inset.
+    viewsStack_->setContentsMargins(kPageHorizontalInset, 0,
+                                    kPageHorizontalInset, 0);
     const auto addInsetView = [this](QWidget* page) {
         const QMargins margins = page->contentsMargins();
         // Keep one shared horizontal inset for all tabs in the asset panel.
