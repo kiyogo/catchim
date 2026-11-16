@@ -15,7 +15,7 @@ TimelinePanel::TimelinePanel(editor::EditorEngine& engine,media::MediaLibrary& l
 }
 void TimelinePanel::setupUi() {
     auto* layout=new QVBoxLayout(this);layout->setContentsMargins(1,1,1,1);layout->setSpacing(0);
-    toolbar_=new TimelineToolbar(engine_,this);
+    toolbar_=new TimelineToolbar(engine_,mediaLibrary_,this);
     connect(toolbar_,&TimelineToolbar::zoomChanged,this,&TimelinePanel::onZoomChanged);layout->addWidget(toolbar_);
     rulerWidget_=new TimelineRulerWidget(engine_,this);connect(rulerWidget_,&TimelineRulerWidget::seekRequested,this,&TimelinePanel::onSeekRequested);layout->addWidget(rulerWidget_);
     auto* row=new QHBoxLayout;row->setContentsMargins(0,0,0,0);row->setSpacing(0);

@@ -4,15 +4,131 @@
 #include "ui/icons/UiIcons.h"
 #include "ui/theme/Theme.h"
 #include "ui/widgets/ScenesDrawer.h"
+#include "media/decoder/NativeVideoDecoder.h"
+#include "editor/history/commands/BatchCommand.h"
+#include "editor/history/commands/ProjectCommands.h"
 #include <QHBoxLayout>
 #include <QMenu>
 #include <QSignalBlocker>
+#include <QMessageBox>
+#include <QMetaObject>
+#include <QPointer>
+#include <QRunnable>
+#include <QThreadPool>
+#include <algorithm>
+#include <cmath>
+#include <functional>
+#include <vector>
 
 namespace catchim::ui {
+namespace {
 
-TimelineToolbar::TimelineToolbar(editor::EditorEngine& engine, QWidget* parent)
+constexpr int kSceneAnalysisWidth = 64;
+constexpr int kSceneAnalysisHeight = 36;
+constexpr int kSceneAnalysisMaxSamples = 180;
+constexpr double kSceneAnalysisMinInterval = 0.35;
+constexpr double kSceneCutThreshold = 0.2;
+constexpr double kSceneCutMinGap = 1.25;
+
+struct SceneCutSuggestion {
+    double clipTimeSeconds{0.0};
+    double score{0.0};
+};
+
+struct SceneCutAnalysis {
+    std::vector<SceneCutSuggestion> suggestions;
+    QString error;
+};
+
+SceneCutAnalysis detectSceneCuts(
+    const std::filesystem::path& path,
+    double sourceStartSeconds,
+    double clipDurationSeconds,
+    double playbackRate,
+    double sourceDurationSeconds,
+    const std::function<void(double)>& onProgress) {
+    if (!std::isfinite(sourceStartSeconds) || !std::isfinite(clipDurationSeconds) ||
+        !std::isfinite(playbackRate) || sourceStartSeconds < 0.0 ||
+        clipDurationSeconds <= 0.0 || playbackRate <= 0.0) {
+        return {{}, QStringLiteral("Clip không có thời gian hợp lệ để dò chuyển cảnh.")};
+    }
+
+    media::NativeVideoDecoder decoder;
+    decoder.setPreviewSize(kSceneAnalysisWidth, kSceneAnalysisHeight);
+    const double sampleInterval = std::max(
+        kSceneAnalysisMinInterval,
+        clipDurationSeconds / kSceneAnalysisMaxSamples);
+    const int sampleCount = std::min(
+        kSceneAnalysisMaxSamples,
+        std::max(2, static_cast<int>(std::ceil(clipDurationSeconds / sampleInterval))));
+
+    struct ScoredSample {
+        double clipTimeSeconds;
+        double score;
+    };
+    std::vector<ScoredSample> scores;
+    std::vector<uint8_t> previous;
+    for (int sampleIndex = 0; sampleIndex <= sampleCount; ++sampleIndex) {
+        const double clipTimeSeconds = std::clamp(
+            sampleIndex * sampleInterval,
+            0.0,
+            std::max(0.0, clipDurationSeconds - 0.02));
+        const double sourceTime = sourceStartSeconds + clipTimeSeconds * playbackRate;
+        if (std::isfinite(sourceDurationSeconds) && sourceDurationSeconds > 0.0 &&
+            sourceTime >= sourceDurationSeconds) {
+            break;
+        }
+
+        int width = 0;
+        int height = 0;
+        std::vector<uint8_t> rgba;
+        if (!decoder.getFrame(path, sourceTime, width, height, rgba) ||
+            width <= 0 || height <= 0 || rgba.size() != static_cast<size_t>(width) * height * 4) {
+            return {{}, QString("Không thể giải mã frame tại %1 giây.").arg(sourceTime, 0, 'f', 2)};
+        }
+
+        if (!previous.empty()) {
+            double difference = 0.0;
+            size_t pixelCount = 0;
+            for (size_t index = 0; index + 3 < rgba.size(); index += 4) {
+                const double previousLuma = previous[index] * 0.2126 +
+                    previous[index + 1] * 0.7152 + previous[index + 2] * 0.0722;
+                const double currentLuma = rgba[index] * 0.2126 +
+                    rgba[index + 1] * 0.7152 + rgba[index + 2] * 0.0722;
+                const double colorDifference = (
+                    std::abs(static_cast<int>(rgba[index]) - static_cast<int>(previous[index])) +
+                    std::abs(static_cast<int>(rgba[index + 1]) - static_cast<int>(previous[index + 1])) +
+                    std::abs(static_cast<int>(rgba[index + 2]) - static_cast<int>(previous[index + 2]))) / (3.0 * 255.0);
+                difference += 0.6 * std::abs(currentLuma - previousLuma) / 255.0 + 0.4 * colorDifference;
+                ++pixelCount;
+            }
+            scores.push_back({clipTimeSeconds, pixelCount ? difference / pixelCount : 0.0});
+        }
+        previous = std::move(rgba);
+        if (onProgress) onProgress(static_cast<double>(sampleIndex + 1) / (sampleCount + 1));
+    }
+
+    SceneCutAnalysis result;
+    for (size_t index = 0; index < scores.size(); ++index) {
+        const double previousScore = index > 0 ? scores[index - 1].score : 0.0;
+        const double nextScore = index + 1 < scores.size() ? scores[index + 1].score : 0.0;
+        const auto& current = scores[index];
+        const bool isPeak = current.score >= previousScore && current.score > nextScore;
+        const auto last = result.suggestions.empty() ? nullptr : &result.suggestions.back();
+        if (current.score >= kSceneCutThreshold && isPeak &&
+            (!last || current.clipTimeSeconds - last->clipTimeSeconds >= kSceneCutMinGap)) {
+            result.suggestions.push_back({current.clipTimeSeconds, current.score});
+        }
+    }
+    return result;
+}
+
+} // namespace
+
+TimelineToolbar::TimelineToolbar(editor::EditorEngine& engine, media::MediaLibrary& mediaLibrary, QWidget* parent)
     : QWidget(parent)
     , engine_(engine)
+    , mediaLibrary_(mediaLibrary)
 {
     setAttribute(Qt::WA_StyledBackground, true);
     setObjectName("timelineToolbar");
@@ -64,6 +180,99 @@ void TimelineToolbar::setupUi() {
     dupBtn_ = makeIconBtn(UiIcon::Duplicate, "Nhân đôi phần tử");
     connect(dupBtn_, &QPushButton::clicked, this, &TimelineToolbar::onDuplicateClicked);
 
+    sceneCutsBtn_ = makeIconBtn(UiIcon::Video, "Dò điểm chuyển cảnh trên video đã chọn");
+    connect(sceneCutsBtn_, &QPushButton::clicked, this, [this]() {
+        auto* timeline = engine_.activeTimeline();
+        const auto& selected = engine_.selectedClips();
+        if (!timeline || selected.size() != 1) return;
+        const auto* clip = timeline->findClip(selected.front());
+        if (!clip || clip->type() != editor::ClipType::Video) return;
+        const auto asset = mediaLibrary_.findAsset(clip->mediaId());
+        if (!asset || !asset->hasVideo()) {
+            QMessageBox::information(this, "Dò chuyển cảnh", "Không tìm thấy video để phân tích.");
+            return;
+        }
+
+        const auto clipId = clip->id();
+        const auto projectId = engine_.project().metadata().id;
+        const auto sceneId = engine_.project().currentSceneId();
+        const auto startTime = clip->startTime();
+        const auto trimStart = clip->trimStart();
+        const auto clipDuration = clip->duration();
+        const double playbackRate = std::max(0.01, clip->getParam<double>("speed", 1.0));
+        const auto path = asset->filePath();
+        const double sourceDuration = asset->duration().toSeconds();
+
+        isDetectingSceneCuts_ = true;
+        sceneCutsBtn_->setEnabled(false);
+        sceneCutsBtn_->setToolTip("Đang phân tích frame video…");
+        QPointer<TimelineToolbar> target(this);
+        QThreadPool::globalInstance()->start(QRunnable::create(
+            [target, path, sourceStart = trimStart.toSeconds(),
+             duration = clipDuration.toSeconds(), playbackRate, sourceDuration,
+             clipId, projectId, sceneId, startTime, trimStart, clipDuration]() {
+                int lastProgress = -1;
+                auto result = detectSceneCuts(
+                    path, sourceStart, duration, playbackRate, sourceDuration,
+                    [target, &lastProgress](double progress) {
+                        const int percent = static_cast<int>(std::round(progress * 100.0));
+                        if (percent == lastProgress || percent % 5 != 0) return;
+                        lastProgress = percent;
+                        if (!target) return;
+                        QMetaObject::invokeMethod(target.data(), [target, percent] {
+                            if (target && target->sceneCutsBtn_) {
+                                target->sceneCutsBtn_->setToolTip(
+                                    QString("Đang phân tích frame video… %1%").arg(percent));
+                            }
+                        }, Qt::QueuedConnection);
+                    });
+
+                if (!target) return;
+                QMetaObject::invokeMethod(target.data(),
+                    [target, result = std::move(result), clipId, projectId, sceneId,
+                     startTime, trimStart, clipDuration, playbackRate]() mutable {
+                        if (!target) return;
+                        target->isDetectingSceneCuts_ = false;
+                        target->refresh();
+                        if (!result.error.isEmpty()) {
+                            QMessageBox::warning(target.data(), "Dò chuyển cảnh", result.error);
+                            return;
+                        }
+
+                        auto* currentTimeline = target->engine_.activeTimeline();
+                        const auto* currentClip = currentTimeline ? currentTimeline->findClip(clipId) : nullptr;
+                        if (target->engine_.project().metadata().id != projectId ||
+                            target->engine_.project().currentSceneId() != sceneId || !currentClip ||
+                            currentClip->startTime() != startTime || currentClip->trimStart() != trimStart ||
+                            currentClip->duration() != clipDuration ||
+                            std::max(0.01, currentClip->getParam<double>("speed", 1.0)) != playbackRate) {
+                            QMessageBox::information(target.data(), "Dò chuyển cảnh",
+                                "Dự án, cảnh hoặc clip đã thay đổi trong lúc phân tích. Hãy thử lại.");
+                            return;
+                        }
+
+                        auto batch = std::make_unique<editor::BatchCommand>("Detect Scene Cuts");
+                        size_t added = 0;
+                        for (const auto& suggestion : result.suggestions) {
+                            const auto time = startTime + core::TimelineTime::fromSeconds(suggestion.clipTimeSeconds);
+                            if (currentTimeline->hasBookmarkAt(time, core::TimelineTime::fromSeconds(0.02))) continue;
+                            batch->addCommand(std::make_unique<editor::ToggleBookmarkCommand>(
+                                *currentTimeline, time, "Scene cut", "#38bdf8"));
+                            ++added;
+                        }
+                        if (added > 0 && target->engine_.history().execute(std::move(batch))) {
+                            target->engine_.project().setDirty(true);
+                            target->engine_.notifyTimelineChanged();
+                        } else {
+                            added = 0;
+                        }
+                        QMessageBox::information(target.data(), "Dò chuyển cảnh", added > 0
+                            ? QString("Đã thêm %1 dấu mốc chuyển cảnh vào timeline.").arg(added)
+                            : QString("Không tìm thấy điểm chuyển cảnh rõ mới trong clip này."));
+                    }, Qt::QueuedConnection);
+            }));
+    });
+
     auto* freezeBtn = makeIconBtn(UiIcon::Snow, "Đóng băng khung hình");
     freezeBtn->setEnabled(false);
 
@@ -90,6 +299,7 @@ void TimelineToolbar::setupUi() {
     layout->addWidget(splitRightBtn_);
     layout->addWidget(unlinkBtn_);
     layout->addWidget(dupBtn_);
+    layout->addWidget(sceneCutsBtn_);
     layout->addWidget(freezeBtn);
     layout->addWidget(deleteBtn_);
     layout->addWidget(leftSep);
@@ -188,6 +398,10 @@ void TimelineToolbar::refresh() {
     const auto* timeline=engine_.activeTimeline();
     const auto& selected=engine_.selectedClips();
     const auto* clip=timeline&&selected.size()==1?timeline->findClip(selected.front()):nullptr;
+    const auto clipAsset=clip&&clip->type()==editor::ClipType::Video
+        ?mediaLibrary_.findAsset(clip->mediaId()):nullptr;
+    sceneCutsBtn_->setEnabled(clipAsset && clipAsset->hasVideo() && !isDetectingSceneCuts_);
+    if (!isDetectingSceneCuts_) sceneCutsBtn_->setToolTip("Dò điểm chuyển cảnh trên video đã chọn");
     unlinkBtn_->setEnabled(clip&&clip->type()==editor::ClipType::Video&&clip->getParam<bool>("hasAudio",true));
     const bool hasSelection=!selected.empty();splitBtn_->setEnabled(hasSelection);splitLeftBtn_->setEnabled(hasSelection);splitRightBtn_->setEnabled(hasSelection);dupBtn_->setEnabled(hasSelection);deleteBtn_->setEnabled(hasSelection);
     if (timeline) {
@@ -206,6 +420,7 @@ void TimelineToolbar::refresh() {
     if (splitRightBtn_) splitRightBtn_->setIcon(UiIcons::get(UiIcon::SplitRight, pal.textPrimary, 16));
     if (unlinkBtn_) unlinkBtn_->setIcon(UiIcons::get(UiIcon::Link, pal.textPrimary, 16));
     if (dupBtn_) dupBtn_->setIcon(UiIcons::get(UiIcon::Duplicate, pal.textPrimary, 16));
+    if (sceneCutsBtn_) sceneCutsBtn_->setIcon(UiIcons::get(UiIcon::Video, pal.textPrimary, 16));
     if (deleteBtn_) deleteBtn_->setIcon(UiIcons::get(UiIcon::Delete, pal.textPrimary, 16));
     if (bookmarkBtn_) bookmarkBtn_->setIcon(UiIcons::get(UiIcon::Bookmark, pal.textPrimary, 16));
     if (snapBtn_) snapBtn_->setIcon(UiIcons::get(UiIcon::Magnet, snapBtn_->isChecked() ? activeIconCol : pal.textPrimary, 16));
