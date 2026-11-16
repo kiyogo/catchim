@@ -6,6 +6,7 @@
 #include "ui/widgets/PresetInsertion.h"
 #include "editor/clipboard/ClipboardManager.h"
 #include "editor/history/commands/ElementCommands.h"
+#include "editor/history/commands/AdvancedTimelineCommands.h"
 #include "editor/history/commands/TrackCommands.h"
 #include "editor/history/commands/BatchCommand.h"
 #include "media/decoder/NativeAudioDecoder.h"
@@ -1068,6 +1069,19 @@ void TimelineTracksWidget::contextMenuEvent(QContextMenuEvent* event) {
         const bool muted=hit.clip->isMuted(),hidden=hit.clip->isHidden();
         const auto type=hit.clip->type();const auto trackId=hit.track->id();
         if(!engine_.isClipSelected(id))engine_.selectClip(id);
+        std::vector<core::ClipId> rippleTargets;
+        std::vector<core::ClipId> lockedSelection;
+        for(const auto& selectedId:engine_.selectedClips()) {
+            const auto* selectedTrack=tl->findTrackContainingClip(selectedId);
+            if(!selectedTrack||!tl->findClip(selectedId))continue;
+            if(selectedTrack->isLocked())lockedSelection.push_back(selectedId);
+            else rippleTargets.push_back(selectedId);
+        }
+        std::stable_sort(rippleTargets.begin(),rippleTargets.end(),[tl](const auto& left,const auto& right) {
+            const auto* leftClip=tl->findClip(left);
+            const auto* rightClip=tl->findClip(right);
+            return leftClip&&rightClip&&leftClip->startTime()>rightClip->startTime();
+        });
         auto* split=action(UiIcon::Split,"Cắt","S");
         const auto time=engine_.playback().currentTime();
         split->setEnabled(time>hit.clip->startTime()&&time<hit.clip->endTime());
@@ -1088,6 +1102,8 @@ void TimelineTracksWidget::contextMenuEvent(QContextMenuEvent* event) {
         auto* reveal=action(UiIcon::Search,"Hiện media");reveal->setEnabled(!mediaId.isEmpty());
         auto* replace=action(UiIcon::Undo,"Thay media");replace->setEnabled(false);
         menu.addSeparator();
+        auto* rippleDelete=action(UiIcon::Ripple,"Xóa và đóng khoảng trống");
+        rippleDelete->setEnabled(!rippleTargets.empty());
         auto* remove=action(UiIcon::Delete,"Xóa clip","BACKSPACE");remove->setIcon(UiIcons::get(UiIcon::Delete,pal.destructive,14));
         const auto* chosen=menu.exec(event->globalPos());
         if(chosen==copy)editor::ClipboardManager::instance().copy(*tl,engine_.selectedClips());
@@ -1119,6 +1135,19 @@ void TimelineTracksWidget::contextMenuEvent(QContextMenuEvent* event) {
         }
         else if(chosen==duplicate)engine_.duplicateSelectedClips();
         else if(chosen==split)engine_.splitClip(id,engine_.playback().currentTime());
+        else if(chosen==rippleDelete) {
+            auto batch=std::make_unique<editor::BatchCommand>("Ripple Delete");
+            for(const auto& selectedId:rippleTargets)
+                batch->addCommand(std::make_unique<editor::RippleDeleteCommand>(*tl,selectedId));
+            if(engine_.history().execute(std::move(batch))) {
+                engine_.deselectAll();
+                if(!lockedSelection.empty())engine_.selectClips(lockedSelection);
+                engine_.project().setDirty(true);
+                engine_.playback().setDuration(engine_.project().totalDuration());
+                engine_.notifyTimelineChanged();
+                update();
+            }
+        }
         else if(chosen==remove)engine_.deleteSelectedClips();
         else if(chosen==detach)engine_.toggleSourceAudioSeparation();
         else if(chosen==reveal)emit mediaRevealRequested(mediaId);
