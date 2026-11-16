@@ -412,14 +412,18 @@ void AssetsPanel::setupUi() {
     viewsStack_ = new QStackedWidget(this);
     viewsStack_->setContentsMargins(0, 0, 0, 0);
     constexpr int kPageHorizontalInset = 16;
+    if (auto* stackLayout = viewsStack_->layout()) {
+        const QMargins margins = stackLayout->contentsMargins();
+        stackLayout->setContentsMargins(kPageHorizontalInset, margins.top(),
+                                        kPageHorizontalInset, margins.bottom());
+    }
     const auto addInsetView = [this](QWidget* page) {
         const QMargins margins = page->contentsMargins();
-        page->setContentsMargins(kPageHorizontalInset, margins.top(),
-                                 kPageHorizontalInset, margins.bottom());
+        // Keep one shared horizontal inset for all tabs in the asset panel.
+        page->setContentsMargins(0, margins.top(), 0, margins.bottom());
         viewsStack_->addWidget(page);
     };
-    // Apply the horizontal inset to each page itself so it stays consistent
-    // even when the stacked layout or a page's scroll area has its own gutter.
+    // Scroll-area gutters are balanced separately inside each page.
     addInsetView(createMediaView());
     addInsetView(createAudioView());
     addInsetView(createTextView());
