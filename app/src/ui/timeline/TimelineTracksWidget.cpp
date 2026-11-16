@@ -36,9 +36,11 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QMenu>
+#include <QInputDialog>
 #include <QUrl>
 #include <QToolTip>
 #include <QHelpEvent>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -594,9 +596,20 @@ void TimelineTracksWidget::mousePressEvent(QMouseEvent* event) {
             dragStartPos_ = event->pos();
             dragStartTime_ = hit.clip->startTime();
             dragStartDuration_ = hit.clip->duration();
+            dragStartTrimStart_ = hit.clip->trimStart();
+            dragStartSpeed_ = std::clamp(hit.clip->getParam<double>("speed", 1.0), 0.01, 5.0);
             dragRefresh_.start();
 
-            if (hit.isTrimStart) {
+            const double slipRoom = hit.clip->sourceDuration()
+                ? hit.clip->sourceDuration()->toSeconds() - hit.clip->duration().toSeconds() * dragStartSpeed_
+                : 0.0;
+            const bool canSlip = std::isfinite(slipRoom) && slipRoom > 0.001 &&
+                (hit.clip->type() == editor::ClipType::Video || hit.clip->type() == editor::ClipType::Audio);
+            if ((event->modifiers() & Qt::AltModifier) && canSlip && !hit.isTrimStart && !hit.isTrimEnd) {
+                dragMode_ = DragMode::SlippingClip;
+                engine_.selectClip(hit.clip->id());
+                emit clipSelected(hit.clip->id());
+            } else if (hit.isTrimStart) {
                 dragMode_ = DragMode::TrimmingStart;
             } else if (hit.isTrimEnd) {
                 dragMode_ = DragMode::TrimmingEnd;
@@ -625,7 +638,15 @@ void TimelineTracksWidget::mousePressEvent(QMouseEvent* event) {
 void TimelineTracksWidget::mouseMoveEvent(QMouseEvent* event) {
     if (dragMode_ == DragMode::None) {
         auto hit = hitTest(event->pos());
-        if (hit.isTrimStart || hit.isTrimEnd) {
+        const double speed = hit.clip ? std::clamp(hit.clip->getParam<double>("speed", 1.0), 0.01, 5.0) : 1.0;
+        const double slipRoom = hit.clip && hit.clip->sourceDuration()
+            ? hit.clip->sourceDuration()->toSeconds() - hit.clip->duration().toSeconds() * speed
+            : 0.0;
+        const bool canSlip = std::isfinite(slipRoom) && slipRoom > 0.001 &&
+            (hit.clip->type() == editor::ClipType::Video || hit.clip->type() == editor::ClipType::Audio);
+        if (canSlip && (event->modifiers() & Qt::AltModifier) && !hit.isTrimStart && !hit.isTrimEnd) {
+            setCursor(Qt::SizeAllCursor);
+        } else if (hit.isTrimStart || hit.isTrimEnd) {
             setCursor(Qt::SizeHorCursor);
         } else if (hit.isMuteBtn || hit.isHideBtn) {
             setCursor(Qt::PointingHandCursor);
@@ -687,6 +708,32 @@ void TimelineTracksWidget::mouseMoveEvent(QMouseEvent* event) {
                 }
             }
         }
+    } else if (dragMode_ == DragMode::SlippingClip) {
+        snapIndicatorX_ = -1;
+        auto* tl = engine_.activeTimeline();
+        auto* clip = tl ? tl->findClip(activeClipId_) : nullptr;
+        if (clip && clip->sourceDuration().has_value()) {
+            const double sourceDuration = clip->sourceDuration()->toSeconds();
+            const double sourceSpan = dragStartDuration_.toSeconds() * dragStartSpeed_;
+            const double maxTrimStart = sourceDuration - sourceSpan;
+            if (std::isfinite(maxTrimStart) && maxTrimStart >= 0.0) {
+                const double pixelsPerSecond = 50.0 * zoomFactor_;
+                const double deltaTimeline = (event->pos().x() - dragStartPos_.x()) / pixelsPerSecond;
+                const double requested = dragStartTrimStart_.toSeconds() + deltaTimeline * dragStartSpeed_;
+                const auto newTrimStart = core::TimelineTime::fromSeconds(
+                    std::clamp(requested, 0.0, maxTrimStart));
+                if (newTrimStart != clip->trimStart()) {
+                    clip->setTrimStart(newTrimStart);
+                    dragEdited_ = true;
+                    engine_.project().setDirty(true);
+                    if (dragRefresh_.elapsed() >= 33) {
+                        dragRefresh_.restart();
+                        engine_.notifyTimelineChanged();
+                    }
+                }
+            }
+        }
+        update();
     } else if (dragMode_ == DragMode::TrimmingStart) {
         core::TimelineTime targetTime = pixelToTime(event->pos().x());
         auto* tl = engine_.activeTimeline();
@@ -911,6 +958,14 @@ void TimelineTracksWidget::contextMenuEvent(QContextMenuEvent* event) {
         split->setEnabled(time>hit.clip->startTime()&&time<hit.clip->endTime());
         auto* copy=action(UiIcon::Duplicate,"Sao chép","CTRL C");
         auto* duplicate=action(UiIcon::Duplicate,"Nhân đôi","CTRL D");
+        const double slipSpeed=std::clamp(hit.clip->getParam<double>("speed",1.0),0.01,5.0);
+        const double slipRoom=hit.clip->sourceDuration()
+            ? hit.clip->sourceDuration()->toSeconds()-hit.clip->duration().toSeconds()*slipSpeed
+            : 0.0;
+        const bool canSlip=std::isfinite(slipRoom)&&slipRoom>0.001&&
+            (type==editor::ClipType::Video||type==editor::ClipType::Audio);
+        auto* slip=action(UiIcon::Speed,"Trượt nội dung nguồn…","ALT + kéo");
+        slip->setEnabled(canSlip);
         auto* mute=action(muted?UiIcon::Volume:UiIcon::VolumeMute,muted?"Bật tiếng":"Tắt tiếng");
         mute->setEnabled(type==editor::ClipType::Audio||type==editor::ClipType::Video);
         auto* detach=action(UiIcon::Unlink,"Tách âm thanh");detach->setEnabled(type==editor::ClipType::Video);
@@ -921,6 +976,32 @@ void TimelineTracksWidget::contextMenuEvent(QContextMenuEvent* event) {
         auto* remove=action(UiIcon::Delete,"Xóa clip","BACKSPACE");remove->setIcon(UiIcons::get(UiIcon::Delete,pal.destructive,14));
         const auto* chosen=menu.exec(event->globalPos());
         if(chosen==copy)editor::ClipboardManager::instance().copy(*tl,engine_.selectedClips());
+        else if(chosen==slip&&canSlip) {
+            const auto* clip=tl->findClip(id);
+            if(!clip||!clip->sourceDuration())return;
+            const double speed=std::clamp(clip->getParam<double>("speed",1.0),0.01,5.0);
+            const double sourceDuration=clip->sourceDuration()->toSeconds();
+            const double maxTrimStart=sourceDuration-clip->duration().toSeconds()*speed;
+            if(!std::isfinite(maxTrimStart)||maxTrimStart<0.0)return;
+            const double currentTrim=clip->trimStart().toSeconds();
+            bool accepted=false;
+            const double delta=QInputDialog::getDouble(this,"Trượt nội dung clip",
+                "Độ lệch nguồn (giây; số dương dịch về sau):",0.0,-currentTrim,
+                std::max(-currentTrim,maxTrimStart-currentTrim),3,&accepted);
+            if(!accepted)return;
+            const auto before=tl->createSnapshot();
+            auto* mutableClip=tl->findClip(id);
+            if(!mutableClip)return;
+            mutableClip->setTrimStart(core::TimelineTime::fromSeconds(currentTrim+delta));
+            const auto after=tl->createSnapshot();
+            if(!engine_.history().execute(std::make_unique<editor::TracksSnapshotCommand>(
+                    *tl,before,after,"Slip clip source"))) {
+                tl->restoreSnapshot(before);
+                return;
+            }
+            engine_.project().setDirty(true);
+            engine_.notifyTimelineChanged();
+        }
         else if(chosen==duplicate)engine_.duplicateSelectedClips();
         else if(chosen==split)engine_.splitClip(id,engine_.playback().currentTime());
         else if(chosen==remove)engine_.deleteSelectedClips();

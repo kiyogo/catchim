@@ -50,7 +50,7 @@ protected:
     bool event(QEvent* event) override;
 
 private:
-    enum class DragMode { None, MovingClip, TrimmingStart, TrimmingEnd, BoxSelecting };
+    enum class DragMode { None, MovingClip, TrimmingStart, TrimmingEnd, SlippingClip, BoxSelecting };
 
     struct HitTestResult {
         const editor::Track* track{nullptr};
@@ -84,6 +84,8 @@ private:
     QPoint dragStartPos_;
     core::TimelineTime dragStartTime_;
     core::TimelineTime dragStartDuration_;
+    core::TimelineTime dragStartTrimStart_;
+    double dragStartSpeed_{1.0};
     int snapIndicatorX_{-1};
     QRect dropIndicatorRect_;
     bool showDropIndicator_{false};
