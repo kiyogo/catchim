@@ -403,9 +403,11 @@ void AssetsPanel::setupUi() {
 
     viewsStack_ = new QStackedWidget(this);
     viewsStack_->setContentsMargins(0, 0, 0, 0);
+    constexpr int kPageHorizontalInset = 16;
     const auto addInsetView = [this](QWidget* page) {
         const QMargins margins = page->contentsMargins();
-        page->setContentsMargins(12, margins.top(), 12, margins.bottom());
+        page->setContentsMargins(kPageHorizontalInset, margins.top(),
+                                 kPageHorizontalInset, margins.bottom());
         viewsStack_->addWidget(page);
     };
     // Apply the horizontal inset to each page itself so it stays consistent
