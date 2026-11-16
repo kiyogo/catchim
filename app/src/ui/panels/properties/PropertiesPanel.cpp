@@ -8,10 +8,14 @@
 #include "editor/history/commands/KeyframeCommands.h"
 #include "editor/history/commands/EffectKeyframeCommands.h"
 #include "editor/animation/EffectParamAnimationEngine.h"
+#include "render/effects/ClipMotionPresets.h"
+#include "ui/widgets/ClipMotionPresetPreview.h"
 #include <QHBoxLayout>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QComboBox>
+#include <QTabWidget>
 #include <QTextEdit>
 #include <QCheckBox>
 #include <QColorDialog>
@@ -22,6 +26,7 @@
 #include <QSignalBlocker>
 #include <QTimer>
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace catchim::ui {
@@ -299,6 +304,115 @@ void PropertiesPanel::setupUi() {
     auto* removeEffect=new QPushButton("Xóa");removeEffect->setObjectName("removeClipEffect");removeEffect->setFixedHeight(28);
     effectActionsLayout->addWidget(moveEffectUp);effectActionsLayout->addWidget(moveEffectDown);effectActionsLayout->addWidget(toggleEffect,1);effectActionsLayout->addWidget(removeEffect);effects->addWidget(effectActions);
     auto* effectInfo=new QLabel;effectInfo->setWordWrap(true);effects->addWidget(effectInfo);
+    struct MotionSlotUi {
+        QString slot;
+        QComboBox* preset{nullptr};
+        QDoubleSpinBox* duration{nullptr};
+        QLabel* preview{nullptr};
+        QLabel* title{nullptr};
+        QLabel* description{nullptr};
+        QPushButton* apply{nullptr};
+        QPushButton* clear{nullptr};
+    };
+    auto* motionTabs=new QTabWidget;
+    motionTabs->setObjectName("clipMotionTabs");
+    motionTabs->setDocumentMode(true);
+    effects->addWidget(motionTabs);
+    std::vector<MotionSlotUi> motionSlots;
+    const std::array<std::pair<QString,QString>,3> motionSlotTabs{{
+        {QStringLiteral("in"),QStringLiteral("Vào")},
+        {QStringLiteral("loop"),QStringLiteral("Lặp")},
+        {QStringLiteral("out"),QStringLiteral("Ra")}
+    }};
+    for(const auto& [slot,tabTitle]:motionSlotTabs) {
+        auto* page=new QWidget(motionTabs);
+        auto* pageLayout=new QVBoxLayout(page);
+        pageLayout->setContentsMargins(6,8,6,6);
+        pageLayout->setSpacing(6);
+        auto* preview=new QLabel(page);
+        preview->setObjectName("motionPresetPreview_"+slot);
+        preview->setFixedSize(180,102);
+        preview->setAlignment(Qt::AlignCenter);
+        preview->setProperty("class","presetDemoPreview");
+        preview->setStyleSheet("border:1px solid palette(mid); border-radius:6px;");
+        pageLayout->addWidget(preview,0,Qt::AlignHCenter);
+        auto* title=new QLabel("Chưa chọn hiệu ứng",page);
+        title->setObjectName("motionPresetTitle_"+slot);
+        title->setAlignment(Qt::AlignCenter);
+        title->setStyleSheet("font-weight:600;");
+        pageLayout->addWidget(title);
+        auto* description=new QLabel("Chọn hiệu ứng để xem demo và mô tả.",page);
+        description->setObjectName("motionPresetDescription_"+slot);
+        description->setAlignment(Qt::AlignCenter);
+        description->setWordWrap(true);
+        description->setProperty("class","SecondaryLabel");
+        pageLayout->addWidget(description);
+        auto* preset=new QComboBox(page);
+        preset->setObjectName("motionPreset_"+slot);
+        preset->setAccessibleName(QString("Hiệu ứng %1 cho clip").arg(tabTitle));
+        preset->addItem("Chưa chọn",QString());
+        for(const auto& group:render::clipMotionPresetGroups()) {
+            for(const auto& item:group.presets) {
+                if(item.slot!=slot.toStdString())continue;
+                const QString name=QString::fromStdString(item.name);
+                const int row=preset->count();
+                preset->addItem(name,QString::fromStdString(item.type));
+                preset->setItemData(row,QString::fromStdString(item.description),Qt::ToolTipRole);
+            }
+        }
+        pageLayout->addWidget(preset);
+        auto* durationRow=new QWidget(page);
+        auto* durationLayout=new QHBoxLayout(durationRow);
+        durationLayout->setContentsMargins(0,0,0,0);
+        durationLayout->setSpacing(6);
+        durationLayout->addWidget(new QLabel(slot=="loop"?"Chu kỳ lặp (giây)":"Thời lượng (giây)",durationRow));
+        auto* duration=new QDoubleSpinBox(durationRow);
+        duration->setObjectName("motionDuration_"+slot);
+        duration->setRange(.05,10.0);
+        duration->setSingleStep(.1);
+        duration->setDecimals(2);
+        duration->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        duration->setFixedHeight(28);
+        duration->setKeyboardTracking(false);
+        durationLayout->addWidget(duration,1);
+        pageLayout->addWidget(durationRow);
+        auto* actionRow=new QWidget(page);
+        auto* actionLayout=new QHBoxLayout(actionRow);
+        actionLayout->setContentsMargins(0,0,0,0);
+        actionLayout->setSpacing(6);
+        auto* apply=new QPushButton("Áp dụng",actionRow);
+        apply->setObjectName("applyMotion_"+slot);
+        apply->setFixedHeight(28);
+        auto* clear=new QPushButton("Gỡ",actionRow);
+        clear->setObjectName("clearMotion_"+slot);
+        clear->setFixedHeight(28);
+        actionLayout->addWidget(apply,1);
+        actionLayout->addWidget(clear);
+        pageLayout->addWidget(actionRow);
+        pageLayout->addStretch(1);
+        motionTabs->addTab(page,tabTitle);
+        MotionSlotUi motion{slot,preset,duration,preview,title,description,apply,clear};
+        const auto refreshPreview=[motion]() {
+            const QString type=motion.preset->currentData().toString();
+            if(type.isEmpty()) {
+                motion.preview->clear();
+                motion.title->setText("Chưa chọn hiệu ứng");
+                motion.description->setText("Chọn hiệu ứng để xem demo và mô tả.");
+                motion.apply->setEnabled(false);
+                return;
+            }
+            const double loopPeriod=std::round(motion.duration->value()*10.0)/10.0;
+            motion.preview->setPixmap(clipMotionPresetPreview(motion.slot,type,loopPeriod));
+            motion.title->setText(motion.preset->currentText());
+            motion.description->setText(motion.preset->currentData(Qt::ToolTipRole).toString());
+            motion.apply->setEnabled(motion.apply->property("motionEditable").toBool());
+        };
+        connect(preset,qOverload<int>(&QComboBox::currentIndexChanged),this,[refreshPreview](int){refreshPreview();});
+        connect(duration,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[motion,refreshPreview](double){
+            if(motion.slot=="loop")refreshPreview();
+        });
+        motionSlots.push_back(motion);
+    }
     readers_.push_back([this,effectStack,moveEffectUp,moveEffectDown,toggleEffect,removeEffect](const editor::Clip& c){
         QSignalBlocker guard(effectStack);const auto previousId=selectedEffectId_;effectStack->clear();int selectedRow=-1;
         for(size_t i=0;i<c.effects().size();++i){const auto& effect=c.effects()[i];auto* item=new QListWidgetItem(effectDisplayName(effect.type)+(effect.enabled?QString():QStringLiteral(" · Tắt")),effectStack);item->setData(Qt::UserRole,QString::fromStdString(effect.id));if(effect.id==previousId)selectedRow=static_cast<int>(i);}
@@ -311,7 +425,123 @@ void PropertiesPanel::setupUi() {
     readers_.push_back([this,effectInfo](const editor::Clip& c){
         QString effectName=QString::fromStdString(c.getParam<std::string>("effect.name","Không có"));
         if(const auto* effect=selectedEffect(c,selectedEffectId_))effectName=effectDisplayName(effect->type);
-        effectInfo->setText(QString("Hiệu ứng: %1\nChuyển cảnh: %2").arg(effectName,QString::fromStdString(c.getParam<std::string>("transition.type","Không có"))));
+        const auto motionLabel=[&c](const char* slot){
+            const auto value=c.getParam<std::string>(std::string("transition.")+slot+".type","");
+            if(value.empty())return QString("—");
+            if(value=="slide_left")return QString("Trượt trái");
+            if(value=="slide_right")return QString("Trượt phải");
+            if(value=="slide_top")return QString::fromLatin1(slot)=="in"?QString("Trượt từ trên"):QString("Trượt lên");
+            if(value=="slide_bottom")return QString::fromLatin1(slot)=="in"?QString("Trượt từ dưới"):QString("Trượt xuống");
+            if(value=="wipe_left")return QString("Mở từ trái");
+            if(value=="wipe_right")return QString("Mở từ phải");
+            if(value=="zoom_out")return QString("Thu nhỏ");
+            if(value=="zoom")return QString("Phóng to");
+            if(value=="drop_in")return QString("Rơi vào");
+            if(value=="drop_out")return QString("Rơi ra");
+            if(value=="pop_in")return QString("Pop In");
+            if(value=="pop_out")return QString("Pop Out");
+            if(value=="spin")return QString::fromLatin1(slot)=="in"?QString("Xoay vào"):QString("Xoay ra");
+            if(value=="bounce")return QString::fromLatin1(slot)=="in"?QString("Bật nảy vào"):QString("Bật nảy ra");
+            if(value=="zoom_pulse")return QString("Zoom Pulse");
+            if(value=="rotate_loop")return QString("Xoay đều");
+            if(value=="float")return QString("Lơ lửng");
+            if(value=="sway")return QString("Đung đưa");
+            if(value=="heartbeat")return QString("Nhịp tim");
+            if(value=="flicker")return QString("Chập chờn");
+            if(value=="pendulum")return QString("Con lắc");
+            if(value=="drift")return QString("Trôi ngang");
+            if(value=="breathe")return QString("Nhịp thở");
+            if(value=="wobble")return QString("Lắc nghiêng");
+            if(value=="bounce_loop")return QString("Nảy liên tục");
+            if(value=="elastic_in"||value=="elastic_out")return QString("Co giãn đàn hồi");
+            if(value=="flip_in_x"||value=="flip_out_x")return QString("Lật ngang");
+            if(value=="flip_in_y"||value=="flip_out_y")return QString("Lật dọc");
+            if(value=="tilt_in"||value=="tilt_out")return QString("Nghiêng");
+            if(value=="whip_left")return QString("Whip trái");
+            if(value=="whip_right")return QString("Whip phải");
+            if(value=="jitter")return QString("Rung nhanh");
+            if(value=="orbit")return QString("Quỹ đạo tròn");
+            if(value=="squash")return QString("Co giãn ngang dọc");
+            if(value=="flash")return QString("Chớp sáng");
+            if(value=="spin_pulse")return QString("Xoay theo nhịp");
+            return QString::fromStdString(value);
+        };
+        const auto legacy=QString::fromStdString(c.getParam<std::string>("transition.type","Không có"));
+        effectInfo->setText(QString("Hiệu ứng: %1\nChuyển cảnh cũ: %2\nVào: %3\nRa: %4\nLặp: %5")
+            .arg(effectName,legacy,motionLabel("in"),motionLabel("out"),motionLabel("loop")));
+    });
+    const auto applyMotionSlot=[this](const MotionSlotUi& motion,bool remove) {
+        if(engine_.selectedClips().size()!=1)return;
+        auto* timeline=engine_.activeTimeline();if(!timeline)return;
+        const auto clipId=engine_.selectedClips().front();
+        const auto* clip=timeline->findClip(clipId);
+        const auto* track=timeline->findTrackContainingClip(clipId);
+        if(!clip||!track||track->isLocked()||track->isHidden()||clip->isHidden()||
+           (clip->type()!=editor::ClipType::Video&&clip->type()!=editor::ClipType::Image))return;
+        const QString selectedType=motion.preset->currentData().toString();
+        if(!remove&&selectedType.isEmpty())return;
+        const std::string typeKey="transition."+motion.slot.toStdString()+".type";
+        const std::string durationKey="transition."+motion.slot.toStdString()+
+            (motion.slot=="loop"?".period":".duration");
+        const double maximum=motion.slot=="loop"?10.0:std::max(.05,clip->duration().toSeconds());
+        const double duration=std::clamp(motion.duration->value(),.05,maximum);
+        const std::string type=remove?std::string{}:selectedType.toStdString();
+        if(clip->getParam<std::string>(typeKey,"")==type&&
+           std::abs(clip->getParam<double>(durationKey,motion.slot=="loop"?.8:.5)-duration)<1e-6)return;
+        editor::ElementPatch update{};
+        update.clipId=clipId;
+        update.patchParams[typeKey]=type;
+        update.patchParams[durationKey]=duration;
+        if(!engine_.history().execute(std::make_unique<editor::UpdateElementsCommand>(
+                *timeline,std::vector<editor::ElementPatch>{std::move(update)})))return;
+        engine_.project().setDirty(true);
+        engine_.notifyTimelineChanged();
+        refresh();
+    };
+    for(const auto& motion:motionSlots) {
+        connect(motion.apply,&QPushButton::clicked,this,[applyMotionSlot,motion]{applyMotionSlot(motion,false);});
+        connect(motion.clear,&QPushButton::clicked,this,[applyMotionSlot,motion]{applyMotionSlot(motion,true);});
+    }
+    readers_.push_back([this,motionTabs,motionSlots](const editor::Clip& c){
+        const bool visual=c.type()==editor::ClipType::Video||c.type()==editor::ClipType::Image;
+        motionTabs->setVisible(visual);
+        const bool single=engine_.selectedClips().size()==1;
+        const auto* timeline=engine_.activeTimeline();
+        const auto* track=timeline?timeline->findTrackContainingClip(c.id()):nullptr;
+        const bool editable=single&&visual&&track&&!track->isLocked()&&!track->isHidden()&&!c.isHidden();
+        for(const auto& motion:motionSlots) {
+            const std::string prefix="transition."+motion.slot.toStdString()+".";
+            const std::string durationKey=prefix+(motion.slot=="loop"?"period":"duration");
+            const std::string type=c.getParam<std::string>(prefix+"type","");
+            const int index=motion.preset->findData(QString::fromStdString(type));
+            {
+                QSignalBlocker presetGuard(motion.preset);
+                if(index>=0)motion.preset->setCurrentIndex(index);
+                else motion.preset->setCurrentIndex(0);
+            }
+            const double maxDuration=motion.slot=="loop"?10.0:std::max(.05,c.duration().toSeconds());
+            {
+                QSignalBlocker durationGuard(motion.duration);
+                motion.duration->setMaximum(std::min(10.0,maxDuration));
+                motion.duration->setValue(std::clamp(c.getParam<double>(durationKey,motion.slot=="loop"?.8:.5),
+                                                     .05,motion.duration->maximum()));
+            }
+            const QString selectedType=motion.preset->currentData().toString();
+            if(!selectedType.isEmpty()) {
+                const double loopPeriod=std::round(motion.duration->value()*10.0)/10.0;
+                motion.preview->setPixmap(clipMotionPresetPreview(motion.slot,selectedType,loopPeriod));
+                motion.title->setText(motion.preset->currentText());
+                motion.description->setText(motion.preset->currentData(Qt::ToolTipRole).toString());
+            } else {
+                motion.preview->clear();
+                motion.title->setText(type.empty()?QStringLiteral("Chưa chọn hiệu ứng"):QString::fromStdString(type));
+                motion.description->setText(type.empty()?QStringLiteral("Chọn hiệu ứng để xem demo và mô tả."):
+                    QStringLiteral("Hiệu ứng tùy chỉnh của dự án."));
+            }
+            motion.apply->setProperty("motionEditable",editable);
+            motion.apply->setEnabled(editable&&!selectedType.isEmpty());
+            motion.clear->setEnabled(editable&&!type.empty());
+        }
     });
     connect(effectStack,&QListWidget::currentRowChanged,this,[this,effectStack](int row){if(row<0)return;selectedEffectId_=effectStack->item(row)->data(Qt::UserRole).toString().toStdString();refresh();});
     auto executeEffectCommand=[this,effectStack](const std::function<std::unique_ptr<editor::EditorCommand>(editor::Timeline&,const core::TrackId&,const core::ClipId&,const std::string&,size_t)>& factory){

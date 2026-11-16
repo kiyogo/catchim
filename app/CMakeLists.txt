@@ -691,6 +691,8 @@ if(HAVE_QT6)
         resources/fonts.qrc
         src/ui/icons/UiIcons.cpp
         src/ui/icons/UiIcons.h
+        src/ui/widgets/ClipMotionPresetPreview.cpp
+        src/ui/widgets/ClipMotionPresetPreview.h
         src/ui/theme/Colors.h
         src/ui/theme/Metrics.h
         src/ui/theme/Theme.cpp
