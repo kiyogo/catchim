@@ -57,6 +57,7 @@ TimelineTracksWidget::TimelineTracksWidget(
 {
     setMouseTracking(true);
     setAcceptDrops(true);
+    setFocusPolicy(Qt::ClickFocus);
     setAttribute(Qt::WA_OpaquePaintEvent);
     thumbnailPool_.setMaxThreadCount(1);
     waveformPool_.setMaxThreadCount(1);
@@ -295,6 +296,73 @@ TimelineTracksWidget::HitTestResult TimelineTracksWidget::hitTest(const QPoint& 
         yOffset += trackHeight + Metrics::trackGap;
     }
     return res;
+}
+
+std::optional<TimelineTracksWidget::RollEditState> TimelineTracksWidget::resolveRollEdit(
+    const HitTestResult& hit) const {
+    if (!hit.track || hit.track->isLocked() || !hit.clip || (!hit.isTrimStart && !hit.isTrimEnd))
+        return std::nullopt;
+
+    const editor::Clip* left = nullptr;
+    const editor::Clip* right = nullptr;
+    for (const auto& candidate : hit.track->clips()) {
+        if (candidate.id() == hit.clip->id()) continue;
+        if (hit.isTrimEnd) {
+            const auto distance = candidate.startTime().ticks() - hit.clip->endTime().ticks();
+            if (distance >= -1 && distance <= 1) {
+                if (right) return std::nullopt;
+                left = hit.clip;
+                right = &candidate;
+            }
+        } else {
+            const auto distance = hit.clip->startTime().ticks() - candidate.endTime().ticks();
+            if (distance >= -1 && distance <= 1) {
+                if (left) return std::nullopt;
+                left = &candidate;
+                right = hit.clip;
+            }
+        }
+    }
+    if (!left || !right) return std::nullopt;
+
+    const auto isMediaClip = [](editor::ClipType type) {
+        return type == editor::ClipType::Video || type == editor::ClipType::Audio;
+    };
+    if (!isMediaClip(left->type()) || !isMediaClip(right->type()) ||
+        !left->sourceDuration() || !right->sourceDuration()) return std::nullopt;
+
+    const double leftSpeed = std::clamp(left->getParam<double>("speed", 1.0), 0.01, 5.0);
+    const double rightSpeed = std::clamp(right->getParam<double>("speed", 1.0), 0.01, 5.0);
+    const auto minimumDuration = engine_.project().settings().fps.frameDuration();
+    const auto leftTrim = left->trimStart();
+    const auto rightTrim = right->trimStart();
+    const auto leftSourceDuration = *left->sourceDuration();
+    const auto rightSourceDuration = *right->sourceDuration();
+
+    if (left->duration() < minimumDuration || right->duration() < minimumDuration ||
+        leftTrim.ticks() < 0 || rightTrim.ticks() < 0 ||
+        leftTrim + left->duration() * leftSpeed > leftSourceDuration ||
+        rightTrim + right->duration() * rightSpeed > rightSourceDuration) return std::nullopt;
+
+    const auto minDelta = std::max(
+        minimumDuration - left->duration(),
+        core::TimelineTime::zero() - rightTrim / rightSpeed);
+    const auto maxDelta = std::min(
+        right->duration() - minimumDuration,
+        (leftSourceDuration - leftTrim) / leftSpeed - left->duration());
+    if (minDelta >= maxDelta) return std::nullopt;
+
+    return RollEditState{
+        .leftClipId = left->id(),
+        .rightClipId = right->id(),
+        .leftDuration = left->duration(),
+        .rightStart = right->startTime(),
+        .rightDuration = right->duration(),
+        .rightTrimStart = rightTrim,
+        .minDelta = minDelta,
+        .maxDelta = maxDelta,
+        .rightSpeed = rightSpeed
+    };
 }
 
 editor::Track* TimelineTracksWidget::findTrackAtY(int y) {
@@ -600,6 +668,17 @@ void TimelineTracksWidget::mousePressEvent(QMouseEvent* event) {
             dragStartSpeed_ = std::clamp(hit.clip->getParam<double>("speed", 1.0), 0.01, 5.0);
             dragRefresh_.start();
 
+            rollEditState_.reset();
+            if ((event->modifiers() & Qt::ShiftModifier) && (hit.isTrimStart || hit.isTrimEnd)) {
+                rollEditState_ = resolveRollEdit(hit);
+                if (rollEditState_) {
+                    dragMode_ = DragMode::RollingCut;
+                    update();
+                    event->accept();
+                    return;
+                }
+            }
+
             const double slipRoom = hit.clip->sourceDuration()
                 ? hit.clip->sourceDuration()->toSeconds() - hit.clip->duration().toSeconds() * dragStartSpeed_
                 : 0.0;
@@ -638,6 +717,11 @@ void TimelineTracksWidget::mousePressEvent(QMouseEvent* event) {
 void TimelineTracksWidget::mouseMoveEvent(QMouseEvent* event) {
     if (dragMode_ == DragMode::None) {
         auto hit = hitTest(event->pos());
+        if ((event->modifiers() & Qt::ShiftModifier) && resolveRollEdit(hit)) {
+            setCursor(Qt::SplitHCursor);
+            QWidget::mouseMoveEvent(event);
+            return;
+        }
         const double speed = hit.clip ? std::clamp(hit.clip->getParam<double>("speed", 1.0), 0.01, 5.0) : 1.0;
         const double slipRoom = hit.clip && hit.clip->sourceDuration()
             ? hit.clip->sourceDuration()->toSeconds() - hit.clip->duration().toSeconds() * speed
@@ -734,6 +818,36 @@ void TimelineTracksWidget::mouseMoveEvent(QMouseEvent* event) {
             }
         }
         update();
+    } else if (dragMode_ == DragMode::RollingCut) {
+        snapIndicatorX_ = -1;
+        auto* tl = engine_.activeTimeline();
+        const auto state = rollEditState_;
+        auto* left = tl && state ? tl->findClip(state->leftClipId) : nullptr;
+        auto* right = tl && state ? tl->findClip(state->rightClipId) : nullptr;
+        if (left && right && state) {
+            const double pixelsPerSecond = 50.0 * zoomFactor_;
+            const auto requested = core::TimelineTime::fromSeconds(
+                (event->pos().x() - dragStartPos_.x()) / pixelsPerSecond);
+            const auto delta = requested.clamp(state->minDelta, state->maxDelta);
+            const auto nextLeftDuration = state->leftDuration + delta;
+            const auto nextRightStart = state->rightStart + delta;
+            const auto nextRightDuration = state->rightDuration - delta;
+            const auto nextRightTrimStart = state->rightTrimStart + delta * state->rightSpeed;
+            if (nextLeftDuration != left->duration() || nextRightStart != right->startTime() ||
+                nextRightDuration != right->duration() || nextRightTrimStart != right->trimStart()) {
+                left->setDuration(nextLeftDuration);
+                right->setStartTime(nextRightStart);
+                right->setDuration(nextRightDuration);
+                right->setTrimStart(nextRightTrimStart);
+                dragEdited_ = true;
+                engine_.project().setDirty(true);
+                if (dragRefresh_.elapsed() >= 16) {
+                    dragRefresh_.restart();
+                    engine_.notifyTimelineChanged();
+                }
+            }
+        }
+        update();
     } else if (dragMode_ == DragMode::TrimmingStart) {
         core::TimelineTime targetTime = pixelToTime(event->pos().x());
         auto* tl = engine_.activeTimeline();
@@ -789,6 +903,7 @@ void TimelineTracksWidget::mouseReleaseEvent(QMouseEvent* event) {
         if(dragEdited_&&dragSnapshot_&&dragTimeline_==engine_.activeTimeline())
             engine_.history().execute(std::make_unique<editor::TracksSnapshotCommand>(*dragTimeline_,std::move(*dragSnapshot_),dragTimeline_->createSnapshot(),"Timeline gesture"));
         dragSnapshot_.reset();dragTimeline_=nullptr;dragEdited_=false;
+        rollEditState_.reset();
         dragMode_ = DragMode::None;
         setCursor(Qt::ArrowCursor);
         update();

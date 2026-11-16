@@ -7,6 +7,7 @@
 #include <QSet>
 #include <QThreadPool>
 #include <QElapsedTimer>
+#include <optional>
 #include <atomic>
 #include <filesystem>
 #include "editor/EditorEngine.h"
@@ -50,7 +51,7 @@ protected:
     bool event(QEvent* event) override;
 
 private:
-    enum class DragMode { None, MovingClip, TrimmingStart, TrimmingEnd, SlippingClip, BoxSelecting };
+    enum class DragMode { None, MovingClip, TrimmingStart, TrimmingEnd, SlippingClip, RollingCut, BoxSelecting };
 
     struct HitTestResult {
         const editor::Track* track{nullptr};
@@ -62,7 +63,20 @@ private:
         bool isLockBtn{false};
     };
 
+    struct RollEditState {
+        core::ClipId leftClipId;
+        core::ClipId rightClipId;
+        core::TimelineTime leftDuration;
+        core::TimelineTime rightStart;
+        core::TimelineTime rightDuration;
+        core::TimelineTime rightTrimStart;
+        core::TimelineTime minDelta;
+        core::TimelineTime maxDelta;
+        double rightSpeed{1.0};
+    };
+
     HitTestResult hitTest(const QPoint& pos) const;
+    std::optional<RollEditState> resolveRollEdit(const HitTestResult& hit) const;
     editor::Track* findTrackAtY(int y);
     const editor::Track* findTrackAtY(int y) const;
     core::TimelineTime pixelToTime(int pixelX) const;
@@ -93,6 +107,7 @@ private:
     editor::Timeline* dragTimeline_{nullptr};
     bool dragEdited_{false};
     QElapsedTimer dragRefresh_;
+    std::optional<RollEditState> rollEditState_;
     QHash<QString,QImage> thumbnails_;
     QHash<QString,QImage> thumbnailCovers_;
     QSet<QString> pendingThumbnails_;

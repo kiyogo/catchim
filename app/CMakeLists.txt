@@ -807,6 +807,8 @@ if(HAVE_QT6)
                 ${CATCHIM_WASM_PLAYBACK_TEST_MEDIA})
             qt_finalize_executable(catchim_wasm_playback)
         endif()
+        set_property(TARGET catchim_app APPEND PROPERTY LINK_DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/catchim_app.html)
         add_custom_command(TARGET catchim_app POST_BUILD
             COMMAND ${CMAKE_COMMAND}
                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/src/wasm/catchim_app.html

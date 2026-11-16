@@ -42,8 +42,21 @@
   </div>
   <div id="screen"></div>
   <script>
+    const screen = document.getElementById('screen');
+    screen.addEventListener('pointerdown', event => {
+      const path = event.composedPath();
+      const isNativeEditor = path.some(node => node instanceof HTMLElement &&
+        node.matches('input, textarea, select, [contenteditable="true"]:not(canvas)'));
+      const cameFromQtWindow = path.some(node => node instanceof Element &&
+        node.classList.contains('qt-window-contents'));
+      if (isNativeEditor || !cameFromQtWindow) return;
+
+      const qtRoot = screen.querySelector('#qt-shadow-container')?.shadowRoot;
+      const keyboardSurface = qtRoot?.querySelector('canvas.qt-window-content[contenteditable="true"]');
+      keyboardSurface?.focus({ preventScroll: true });
+    }, true);
+
     async function init() {
-      const screen = document.getElementById('screen');
       const loader = document.getElementById('catchim-loader');
       const showError = () => {
         loader.querySelector('.loader-content').style.display = 'none';
