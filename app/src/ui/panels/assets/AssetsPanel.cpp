@@ -98,6 +98,11 @@ static void initializeImportedClip(editor::Clip& clip,const media::MediaAsset& a
     if(asset.fps().toFps()>0)clip.setParam("fps",asset.fps().toFps());
 }
 
+static std::vector<float> generateSfxSamples(
+    const QString& name,
+    double durationSec,
+    double maximumDurationSec = 0.0);
+
 class SectionToggle : public QPushButton {
 public:
     explicit SectionToggle(const QString& title,QWidget* parent):QPushButton(title,parent){setCheckable(true);setFixedHeight(44);setCursor(Qt::PointingHandCursor);}
@@ -368,6 +373,9 @@ void AssetsPanel::hideEvent(QHideEvent* event) {
     if (sidebarTooltip_) {
         sidebarTooltip_->hideTip();
     }
+#if defined(__EMSCRIPTEN__)
+    EM_ASM({ if (Module.catchimStopLocalSfxPreview) Module.catchimStopLocalSfxPreview(); });
+#endif
     QWidget::hideEvent(event);
 }
 
@@ -424,6 +432,9 @@ void AssetsPanel::setupUi() {
 
     connect(tabList_, &QListWidget::currentRowChanged, [this](int row) {
         viewsStack_->setCurrentIndex(row);
+#if defined(__EMSCRIPTEN__)
+        EM_ASM({ if (Module.catchimStopLocalSfxPreview) Module.catchimStopLocalSfxPreview(); });
+#endif
         const auto& curPal = Theme::instance().palette();
         for (int i = 0; i < tabList_->count(); ++i) {
             auto* it = tabList_->item(i);
@@ -1100,6 +1111,40 @@ QWidget* AssetsPanel::createAudioView() {
 #endif
 
     const auto& pal = Theme::instance().palette();
+#if defined(__EMSCRIPTEN__)
+    auto previewName = std::make_shared<QString>();
+    auto previewButton = std::make_shared<QPointer<QPushButton>>();
+    const QColor previewIdleColor = pal.textSecondary;
+    const QColor previewActiveColor = pal.primaryAccent;
+    auto setPreviewButtonState = [previewIdleColor, previewActiveColor](QPushButton* button, bool playing) {
+        if (!button) return;
+        button->setIcon(UiIcons::get(playing ? UiIcon::Pause : UiIcon::Play,
+                                     playing ? previewActiveColor : previewIdleColor, 16));
+        button->setAccessibleName(playing ? "Dừng nghe thử" : "Nghe thử âm thanh");
+        button->setToolTip(button->accessibleName());
+    };
+    auto stopLocalPreview = [previewName, previewButton, setPreviewButtonState] {
+        EM_ASM({ if (Module.catchimStopLocalSfxPreview) Module.catchimStopLocalSfxPreview(); });
+        if (*previewButton) setPreviewButtonState(previewButton->data(), false);
+        previewName->clear();
+        previewButton->clear();
+    };
+    auto* previewStateTimer = new QTimer(view);
+    previewStateTimer->setInterval(100);
+    connect(previewStateTimer, &QTimer::timeout, view, [previewName, previewButton, setPreviewButtonState] {
+        if (previewName->isEmpty() || !*previewButton) return;
+        const QByteArray idUtf8 = previewName->toUtf8();
+        const bool stillPlaying = EM_ASM_INT({
+            return Module.catchimLocalSfxPreviewId === UTF8ToString($0) ? 1 : 0;
+        }, idUtf8.constData()) != 0;
+        if (!stillPlaying) {
+            setPreviewButtonState(previewButton->data(), false);
+            previewName->clear();
+            previewButton->clear();
+        }
+    });
+    previewStateTimer->start();
+#endif
     for (const auto& sfx : sfxList) {
         auto* row = new QWidget(sfxContainer);
         row->setProperty("class", "cardWidget");
@@ -1107,10 +1152,39 @@ QWidget* AssetsPanel::createAudioView() {
         auto* rLayout = new QHBoxLayout(row);
         rLayout->setContentsMargins(8, 6, 8, 6);
 
-        auto* ic = new QLabel(row);
-        ic->setPixmap(UiIcons::getPixmap(UiIcon::Audio, pal.primaryAccent, 16));
-        ic->setFixedSize(20, 20);
-        rLayout->addWidget(ic);
+        auto* previewBtn = new QPushButton(row);
+        previewBtn->setFixedSize(28, 28);
+        previewBtn->setIconSize(QSize(16, 16));
+        previewBtn->setFlat(true);
+        previewBtn->setAccessibleName("Nghe thử âm thanh");
+        previewBtn->setToolTip(previewBtn->accessibleName());
+#if defined(__EMSCRIPTEN__)
+        setPreviewButtonState(previewBtn, false);
+        connect(previewBtn, &QPushButton::clicked, row,
+                [this, previewBtn, sfx, previewName, previewButton, setPreviewButtonState, stopLocalPreview] {
+            if (*previewName == sfx.name && *previewButton == previewBtn) {
+                stopLocalPreview();
+                return;
+            }
+            stopLocalPreview();
+            engine_.playback().pause();
+            constexpr double previewLengthSeconds = 6.0;
+            constexpr int sampleRate = 44100;
+            const auto samples = generateSfxSamples(sfx.name, sfx.duration, previewLengthSeconds);
+            if (samples.empty()) return;
+            const QByteArray idUtf8 = sfx.name.toUtf8();
+            EM_ASM({
+                if (Module.catchimPlayLocalSfxPreview)
+                    Module.catchimPlayLocalSfxPreview($0, $1, $2, UTF8ToString($3));
+            }, samples.data(), static_cast<int>(samples.size()), sampleRate, idUtf8.constData());
+            *previewName = sfx.name;
+            *previewButton = previewBtn;
+            setPreviewButtonState(previewBtn, true);
+        });
+#else
+        previewBtn->hide();
+#endif
+        rLayout->addWidget(previewBtn);
 
         auto* nameLabel = new QLabel(QString("<b>%1</b><br><span style='color:%2;'>%3 • %4s</span>")
             .arg(sfx.name).arg(pal.textSecondary.name()).arg(sfx.category).arg(sfx.duration, 0, 'f', 1), row);
@@ -1187,12 +1261,38 @@ QWidget* AssetsPanel::createAudioView() {
     sfxScroll->setWidget(sfxContainer);
     balanceScrollContentMargins(sfxScroll);
     layout->addWidget(sfxScroll, 1);
-    sfxScroll->hide();connect(localToggle,&QPushButton::toggled,sfxScroll,&QWidget::setVisible);
+    sfxScroll->hide();
+    connect(localToggle, &QPushButton::toggled, view, [sfxScroll
+#if defined(__EMSCRIPTEN__)
+        , stopLocalPreview
+#endif
+    ](bool expanded) {
+        sfxScroll->setVisible(expanded);
+#if defined(__EMSCRIPTEN__)
+        if (!expanded) stopLocalPreview();
+#endif
+    });
     layout->addStretch();
     refreshSoundRows();
-    connect(search, &QLineEdit::textChanged, sfxContainer, [refreshSoundRows] { refreshSoundRows(); });
+    connect(search, &QLineEdit::textChanged, sfxContainer, [refreshSoundRows
+#if defined(__EMSCRIPTEN__)
+        , stopLocalPreview
+#endif
+    ] {
+#if defined(__EMSCRIPTEN__)
+        stopLocalPreview();
+#endif
+        refreshSoundRows();
+    });
     connect(savedTab, &QPushButton::clicked, view,
-            [search, sfxScroll, localToggle, localToggleRow, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows] {
+            [search, sfxScroll, localToggle, localToggleRow, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows
+#if defined(__EMSCRIPTEN__)
+                , stopLocalPreview
+#endif
+            ] {
+#if defined(__EMSCRIPTEN__)
+        stopLocalPreview();
+#endif
         search->show();
         *savedOnly = true;
         refreshSoundRows();
@@ -1202,7 +1302,14 @@ QWidget* AssetsPanel::createAudioView() {
         recordingTimer->stop();
     });
     connect(libraryTab, &QPushButton::clicked, view,
-            [search, notice, localToggle, localToggleRow, sfxScroll, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows] {
+            [search, notice, localToggle, localToggleRow, sfxScroll, voiceoverScroll, recordingTimer, savedOnly, refreshSoundRows
+#if defined(__EMSCRIPTEN__)
+                , stopLocalPreview
+#endif
+            ] {
+#if defined(__EMSCRIPTEN__)
+        stopLocalPreview();
+#endif
         search->show();
         *savedOnly = false;
         notice->setText("Thư viện âm thanh trực tuyến chưa được kết nối.");
@@ -1212,7 +1319,17 @@ QWidget* AssetsPanel::createAudioView() {
         voiceoverScroll->hide();
         recordingTimer->stop();
     });
-    connect(voiceoverTab,&QPushButton::clicked,view,[search,notice,sfxScroll,localToggleRow,voiceoverScroll,recordingTimer]{search->hide();notice->hide();sfxScroll->hide();localToggleRow->hide();voiceoverScroll->show();recordingTimer->start();});
+    connect(voiceoverTab, &QPushButton::clicked, view, [search, notice, sfxScroll, localToggleRow, voiceoverScroll, recordingTimer
+#if defined(__EMSCRIPTEN__)
+        , stopLocalPreview
+#endif
+    ] {
+#if defined(__EMSCRIPTEN__)
+        stopLocalPreview();
+#endif
+        search->hide(); notice->hide(); sfxScroll->hide(); localToggleRow->hide();
+        voiceoverScroll->show(); recordingTimer->start();
+    });
 
     return view;
 }
@@ -2489,9 +2606,15 @@ void AssetsPanel::onAddMediaAsNewLayer(const core::MediaId& id) {
     engine_.notifyTimelineChanged();
 }
 
-static core::MediaId createSfxAsset(media::MediaLibrary& mediaLibrary, const QString& name, double durationSec) {
+static std::vector<float> generateSfxSamples(
+    const QString& name,
+    double durationSec,
+    double maximumDurationSec) {
     constexpr uint32_t sampleRate = 44100;
-    size_t numSamples = static_cast<size_t>(std::max(0.1, durationSec) * sampleRate);
+    const double outputDurationSec = maximumDurationSec > 0.0
+        ? std::min(std::max(0.1, durationSec), maximumDurationSec)
+        : std::max(0.1, durationSec);
+    const size_t numSamples = static_cast<size_t>(outputDurationSec * sampleRate);
     std::vector<float> samples(numSamples, 0.0f);
     constexpr double kPi = 3.14159265358979323846;
 
@@ -2560,6 +2683,12 @@ static core::MediaId createSfxAsset(media::MediaLibrary& mediaLibrary, const QSt
         }
     }
 
+    return samples;
+}
+
+static core::MediaId createSfxAsset(media::MediaLibrary& mediaLibrary, const QString& name, double durationSec) {
+    constexpr uint32_t sampleRate = 44100;
+    const auto samples = generateSfxSamples(name, durationSec);
     auto wavBytes = audio::TtsServiceEngine::encodePcmToWav(samples, sampleRate);
     QString cacheDir = QDir::tempPath() + "/catchim_audio_cache";
     QDir().mkpath(cacheDir);

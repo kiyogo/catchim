@@ -84,6 +84,7 @@
     Module.catchimScheduleAudio = function (samplesPtr, frames, channels, sampleRate, volume, queuePtr, generationPtr, generation, copiedPtr, reserved = false) {
         try {
             if (Atomics.load(HEAPU32, generationPtr >> 2) !== generation) return;
+            if (localSfxPreviewSource) Module.catchimStopLocalSfxPreview();
             const audio = getContext();
             if (!masterGain || channels < 1 || frames < 1) return;
             masterGain.gain.setTargetAtTime(Math.max(0, volume), audio.currentTime, 0.008);
@@ -134,6 +135,64 @@
         if (context) nextStart = context.currentTime + 0.012;
         // The worker already cleared the queue when incrementing generation.
         // Preserve any reservations made after that reset was requested.
+    };
+    let localSfxPreviewSource = null;
+    let localSfxPreviewGain = null;
+    let localSfxPreviewGeneration = 0;
+    Module.catchimLocalSfxPreviewId = "";
+    Module.catchimStopLocalSfxPreview = function () {
+        ++localSfxPreviewGeneration;
+        const source = localSfxPreviewSource;
+        const gain = localSfxPreviewGain;
+        localSfxPreviewSource = null;
+        localSfxPreviewGain = null;
+        Module.catchimLocalSfxPreviewId = "";
+        if (source) {
+            source.onended = null;
+            try { source.stop(); } catch (_) {}
+            try { source.disconnect(); } catch (_) {}
+        }
+        if (gain) {
+            try { gain.disconnect(); } catch (_) {}
+        }
+    };
+    Module.catchimPlayLocalSfxPreview = async function (samplesPtr, frames, sampleRate, id) {
+        Module.catchimStopLocalSfxPreview();
+        const generation = localSfxPreviewGeneration;
+        try {
+            if (frames < 1 || sampleRate < 1) return;
+            // Copy from WASM memory before awaiting browser audio startup; the
+            // C++ vector may leave scope or WASM memory may grow after this call.
+            const samples = HEAPF32.slice(samplesPtr >> 2, (samplesPtr >> 2) + frames);
+            const audio = getContext();
+            if (audio.state !== "running") await audio.resume();
+            if (generation !== localSfxPreviewGeneration) return;
+            const buffer = audio.createBuffer(1, frames, sampleRate);
+            buffer.copyToChannel(samples, 0);
+            const source = audio.createBufferSource();
+            const gain = audio.createGain();
+            source.buffer = buffer;
+            gain.gain.setValueAtTime(0.72, audio.currentTime);
+            source.connect(gain);
+            gain.connect(audio.destination);
+            localSfxPreviewSource = source;
+            localSfxPreviewGain = gain;
+            Module.catchimLocalSfxPreviewId = id;
+            source.onended = () => {
+                if (localSfxPreviewSource !== source) return;
+                localSfxPreviewSource = null;
+                localSfxPreviewGain = null;
+                Module.catchimLocalSfxPreviewId = "";
+                source.disconnect();
+                gain.disconnect();
+            };
+            source.start();
+        } catch (error) {
+            if (generation === localSfxPreviewGeneration) {
+                Module.catchimLocalSfxPreviewId = "";
+                console.warn("[Catchim] Local sound preview could not start:", error);
+            }
+        }
     };
 })();
 
