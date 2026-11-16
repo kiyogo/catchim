@@ -6,6 +6,7 @@
 #include "ui/widgets/ScenesDrawer.h"
 #include "media/decoder/NativeVideoDecoder.h"
 #include "editor/animation/AnimationValueResolvers.h"
+#include "editor/animation/GraphEditorEasingPresets.h"
 #include "editor/animation/GraphEditorSessionEngine.h"
 #include "editor/history/commands/KeyframeCommands.h"
 #include "editor/history/commands/BatchCommand.h"
@@ -15,6 +16,9 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QGridLayout>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineF>
 #include <QMouseEvent>
@@ -23,6 +27,10 @@
 #include <QVBoxLayout>
 #include <QMenu>
 #include <QSignalBlocker>
+#include <QScrollArea>
+#include <QSettings>
+#include <QTabWidget>
+#include <QUuid>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QPointer>
@@ -34,6 +42,9 @@
 #include <iterator>
 #include <utility>
 #include <vector>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/val.h>
+#endif
 
 namespace catchim::ui {
 namespace {
@@ -195,6 +206,7 @@ class CurveEditorDialog final : public QDialog {
 public:
     explicit CurveEditorDialog(std::vector<EditableCurveSegment> segments, QWidget* parent = nullptr)
         : QDialog(parent), segments_(std::move(segments)) {
+        loadCustomPresets();
         setWindowTitle(QStringLiteral("Chỉnh đường cong easing"));
         setModal(true);
         setMinimumWidth(310);
@@ -216,30 +228,54 @@ public:
             }
         };
 
-        auto* presetLabel = new QLabel(QStringLiteral("Preset"), this);
-        root->addWidget(presetLabel);
-        auto* presets = new QGridLayout;
-        presets->setSpacing(4);
-        const std::vector<std::pair<QString, NormalizedCurve>> values = {
-            {QStringLiteral("Smooth"), {0.25, 0.1, 0.25, 1.0}},
-            {QStringLiteral("Ease out"), {0.0, 0.0, 0.2, 1.0}},
-            {QStringLiteral("Ease in"), {0.8, 0.0, 1.0, 1.0}},
-            {QStringLiteral("In out"), {0.4, 0.0, 0.2, 1.0}},
-            {QStringLiteral("Pop"), {0.175, 0.885, 0.32, 1.275}},
-            {QStringLiteral("Linear"), {0.0, 0.0, 1.0, 1.0}}
-        };
-        for (size_t i = 0; i < values.size(); ++i) {
-            auto* preset = new QPushButton(values[i].first, this);
-            preset->setFixedHeight(28);
-            presets->addWidget(preset, static_cast<int>(i / 3), static_cast<int>(i % 3));
-            connect(preset, &QPushButton::clicked, this, [this, curve = values[i].second] {
-                graph_->setCurve(curve);
-                if (activeIndex_ >= 0 && activeIndex_ < static_cast<int>(segments_.size())) {
-                    segments_[activeIndex_].curve = curve;
-                }
-            });
+        auto* presetTabs = new QTabWidget(this);
+        auto* builtinPage = new QWidget(presetTabs);
+        auto* builtinGrid = new QGridLayout(builtinPage);
+        builtinGrid->setContentsMargins(4, 6, 4, 4);
+        builtinGrid->setSpacing(4);
+        int builtinIndex = 0;
+        for (const auto& preset : presets_.allPresets()) {
+            if (preset.isCustom) continue;
+            const NormalizedCurve curve{
+                preset.curve.x1, preset.curve.y1, preset.curve.x2, preset.curve.y2
+            };
+            auto* button = new QPushButton(QString::fromStdString(preset.label), builtinPage);
+            button->setFixedHeight(28);
+            builtinGrid->addWidget(button, builtinIndex / 3, builtinIndex % 3);
+            ++builtinIndex;
+            connect(button, &QPushButton::clicked, this, [this, curve] { setActiveCurve(curve); });
         }
-        root->addLayout(presets);
+        presetTabs->addTab(builtinPage, QStringLiteral("Mẫu có sẵn"));
+
+        auto* savedPage = new QWidget(presetTabs);
+        auto* savedLayout = new QVBoxLayout(savedPage);
+        savedLayout->setContentsMargins(4, 6, 4, 4);
+        savedLayout->setSpacing(6);
+        auto* savePresetButton = new QPushButton(QStringLiteral("+ Lưu mẫu hiện tại"), savedPage);
+        connect(savePresetButton, &QPushButton::clicked, this, [this] {
+            if (activeIndex_ < 0 || activeIndex_ >= static_cast<int>(segments_.size())) return;
+            const auto curve = graph_->curve();
+            const auto id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+            const auto label = std::string("Custom ") + std::to_string(presets_.customPresets().size() + 1);
+            presets_.addCustomPreset(id, label, {curve.x1, curve.y1, curve.x2, curve.y2});
+            persistCustomPresets();
+            rebuildSavedPresets();
+        });
+        savedLayout->addWidget(savePresetButton);
+        auto* savedScroll = new QScrollArea(savedPage);
+        savedScroll->setWidgetResizable(true);
+        savedScroll->setFrameShape(QFrame::NoFrame);
+        savedScroll->setMaximumHeight(150);
+        auto* savedContainer = new QWidget(savedScroll);
+        savedGrid_ = new QGridLayout(savedContainer);
+        savedGrid_->setContentsMargins(0, 0, 0, 0);
+        savedGrid_->setSpacing(4);
+        savedScroll->setWidget(savedContainer);
+        savedLayout->addWidget(savedScroll);
+        presetTabs->addTab(savedPage, QStringLiteral("Đã lưu"));
+        root->addWidget(presetTabs);
+        rebuildSavedPresets();
+
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
         buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Áp dụng"));
@@ -257,9 +293,146 @@ public:
     const std::vector<EditableCurveSegment>& segments() const noexcept { return segments_; }
 
 private:
+    void setActiveCurve(const NormalizedCurve& curve) {
+        graph_->setCurve(curve);
+        if (activeIndex_ >= 0 && activeIndex_ < static_cast<int>(segments_.size())) {
+            segments_[activeIndex_].curve = curve;
+        }
+    }
+
+    void loadCustomPresets() {
+#if defined(__EMSCRIPTEN__)
+        try {
+            const auto stored = emscripten::val::global("localStorage").call<emscripten::val>(
+                "getItem", std::string("graph-editor-presets"));
+            if (stored.isNull() || stored.isUndefined()) return;
+            const auto document = QJsonDocument::fromJson(
+                QString::fromStdString(stored.as<std::string>()).toUtf8());
+            if (!document.isArray()) return;
+            for (const auto& entry : document.array()) {
+                const auto preset = entry.toObject();
+                const auto id = preset.value(QStringLiteral("id")).toString();
+                const auto label = preset.value(QStringLiteral("label")).toString();
+                const auto values = preset.value(QStringLiteral("value")).toArray();
+                if (id.isEmpty() || label.isEmpty() || values.size() != 4) continue;
+                double curve[4]{};
+                bool valid = true;
+                for (int i = 0; i < 4; ++i) {
+                    valid = valid && values[i].isDouble() && std::isfinite(values[i].toDouble());
+                    curve[i] = values[i].toDouble();
+                }
+                if (valid) {
+                    presets_.addCustomPreset(id.toStdString(), label.toStdString(),
+                        {std::clamp(curve[0], 0.0, 1.0), std::clamp(curve[1], -0.5, 1.5),
+                         std::clamp(curve[2], 0.0, 1.0), std::clamp(curve[3], -0.5, 1.5)});
+                }
+            }
+        } catch (...) {
+            // A blocked or malformed localStorage entry should not stop editing.
+        }
+#else
+        const auto storedPresets = QSettings().value(QStringLiteral("graph-editor-presets")).toList();
+        for (const auto& entry : storedPresets) {
+            const auto preset = entry.toMap();
+            const auto id = preset.value(QStringLiteral("id")).toString();
+            const auto label = preset.value(QStringLiteral("label")).toString();
+            const auto values = preset.value(QStringLiteral("value")).toList();
+            if (id.isEmpty() || label.isEmpty() || values.size() != 4) continue;
+            bool valid = true;
+            double curve[4]{};
+            for (int i = 0; i < 4; ++i) {
+                bool numberOk = false;
+                curve[i] = values[i].toDouble(&numberOk);
+                valid = valid && numberOk && std::isfinite(curve[i]);
+            }
+            if (valid) {
+                presets_.addCustomPreset(id.toStdString(), label.toStdString(),
+                    {std::clamp(curve[0], 0.0, 1.0), std::clamp(curve[1], -0.5, 1.5),
+                     std::clamp(curve[2], 0.0, 1.0), std::clamp(curve[3], -0.5, 1.5)});
+            }
+        }
+#endif
+    }
+
+    void persistCustomPresets() const {
+#if defined(__EMSCRIPTEN__)
+        try {
+            QJsonArray storedPresets;
+            for (const auto& preset : presets_.customPresets()) {
+                storedPresets.push_back(QJsonObject{
+                    {QStringLiteral("id"), QString::fromStdString(preset.id)},
+                    {QStringLiteral("label"), QString::fromStdString(preset.label)},
+                    {QStringLiteral("value"), QJsonArray{
+                        preset.curve.x1, preset.curve.y1, preset.curve.x2, preset.curve.y2
+                    }},
+                    {QStringLiteral("isCustom"), true}
+                });
+            }
+            const auto json = QString::fromUtf8(QJsonDocument(storedPresets).toJson(QJsonDocument::Compact));
+            emscripten::val::global("localStorage").call<void>(
+                "setItem", std::string("graph-editor-presets"), json.toStdString());
+        } catch (...) {
+            // Storage can be unavailable in private browsing; keep the current session usable.
+        }
+#else
+        QVariantList storedPresets;
+        for (const auto& preset : presets_.customPresets()) {
+            storedPresets.push_back(QVariantMap{
+                {QStringLiteral("id"), QString::fromStdString(preset.id)},
+                {QStringLiteral("label"), QString::fromStdString(preset.label)},
+                {QStringLiteral("value"), QVariantList{
+                    preset.curve.x1, preset.curve.y1, preset.curve.x2, preset.curve.y2
+                }},
+                {QStringLiteral("isCustom"), true}
+            });
+        }
+        QSettings settings;
+        settings.setValue(QStringLiteral("graph-editor-presets"), storedPresets);
+        settings.sync();
+#endif
+    }
+
+    void rebuildSavedPresets() {
+        while (auto* item = savedGrid_->takeAt(0)) {
+            if (auto* widget = item->widget()) widget->deleteLater();
+            delete item;
+        }
+        const auto& saved = presets_.customPresets();
+        if (saved.empty()) {
+            auto* empty = new QLabel(QStringLiteral("Chưa có mẫu đã lưu"), savedGrid_->parentWidget());
+            empty->setAlignment(Qt::AlignCenter);
+            empty->setMinimumHeight(52);
+            savedGrid_->addWidget(empty, 0, 0, 1, 2);
+            return;
+        }
+        int row = 0;
+        for (const auto& preset : saved) {
+            auto* apply = new QPushButton(QString::fromStdString(preset.label), savedGrid_->parentWidget());
+            apply->setMinimumHeight(28);
+            auto* remove = new QPushButton(QStringLiteral("×"), savedGrid_->parentWidget());
+            remove->setFixedSize(30, 28);
+            remove->setToolTip(QStringLiteral("Xóa mẫu đã lưu"));
+            const auto id = preset.id;
+            const NormalizedCurve curve{
+                preset.curve.x1, preset.curve.y1, preset.curve.x2, preset.curve.y2
+            };
+            connect(apply, &QPushButton::clicked, this, [this, curve] { setActiveCurve(curve); });
+            connect(remove, &QPushButton::clicked, this, [this, id] {
+                presets_.removeCustomPreset(id);
+                persistCustomPresets();
+                rebuildSavedPresets();
+            });
+            savedGrid_->addWidget(apply, row, 0);
+            savedGrid_->addWidget(remove, row, 1);
+            ++row;
+        }
+    }
+
     std::vector<EditableCurveSegment> segments_;
+    editor::GraphEditorEasingPresets presets_;
     QComboBox* segmentPicker_{nullptr};
     BezierCurveWidget* graph_{nullptr};
+    QGridLayout* savedGrid_{nullptr};
     int activeIndex_{0};
 };
 
