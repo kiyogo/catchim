@@ -236,6 +236,10 @@ test('Qt browser export encodes frames through WebCodecs and triggers a download
         isSecureContext: true,
         window: { isSecureContext: true, VideoEncoder: class {}, AudioEncoder: class {}, CatchimMedia: {
             BufferTarget: FakeTarget, Output: FakeOutput, CanvasSource: FakeSource, AudioBufferSource: FakeAudioSource,
+            canEncodeVideo: async (_codec, options) => {
+                calls.push(['video-support', options.hardwareAcceleration]);
+                return options.hardwareAcceleration === 'prefer-software';
+            },
             Mp4OutputFormat: class { constructor() { this.name = 'mp4'; } }, WebMOutputFormat: class { constructor() { this.name = 'webm'; } }
         } },
         document: {
@@ -253,7 +257,8 @@ test('Qt browser export encodes frames through WebCodecs and triggers a download
     const result = new Int32Array(memory);
     await scope.Module.catchimExportBegin(2, 2, 29.97, 1, 'mp4', 'project.mp4', true, 64, 0, true, 0, 8_000_000);
     assert.equal(result[16], 1);
-    assert.equal(calls.find(([type]) => type === 'video-config')[1].hardwareAcceleration, 'prefer-hardware');
+    assert.deepEqual(calls.filter(([type]) => type === 'video-support').map(([, mode]) => mode), ['no-preference', 'prefer-software']);
+    assert.equal(calls.find(([type]) => type === 'video-config')[1].hardwareAcceleration, 'prefer-software');
     assert.equal(calls.find(([type]) => type === 'video-config')[1].bitrate, 8_000_000);
     heap.set(new Uint8Array(16).fill(127), 256);
     await scope.Module.catchimExportFrame(256, 16, 0, 68);
@@ -265,6 +270,46 @@ test('Qt browser export encodes frames through WebCodecs and triggers a download
     assert.equal(calls.some(([type]) => type === 'download'), false);
     assert.equal(scope.Module.catchimExportDownload(), true);
     assert.ok(calls.some(([type, name]) => type === 'download' && name === 'project.mp4'));
+});
+
+test('Qt browser export returns encoder frame errors through the bridge buffer', async () => {
+    const memory = new SharedArrayBuffer(4096);
+    const heap = new Uint8Array(memory);
+    class RejectingSource {
+        constructor() {}
+        async add() { throw new Error('VideoEncoder rejected the first frame'); }
+        close() {}
+    }
+    class FakeTarget { constructor() { this.buffer = null; } }
+    class FakeOutput {
+        constructor(options) { this.target = options.target; }
+        addVideoTrack() {}
+        addAudioTrack() {}
+        async start() {}
+        async cancel() {}
+    }
+    class FakeImageData { constructor(data, width, height) { Object.assign(this, { data, width, height }); } }
+    const r = runtime('wasm-export.js', {
+        Module: { HEAPU8: heap },
+        stringToUTF8(text, pointer, maxBytes) {
+            const bytes = new TextEncoder().encode(text).subarray(0, maxBytes - 1);
+            heap.set(bytes, pointer); heap[pointer + bytes.length] = 0;
+        },
+        window: { isSecureContext: true, VideoEncoder: class {}, CatchimMedia: {
+            BufferTarget: FakeTarget, Output: FakeOutput, CanvasSource: RejectingSource,
+            Mp4OutputFormat: class {}, WebMOutputFormat: class {}
+        } },
+        document: { createElement() { return { width: 0, height: 0, getContext: () => ({ putImageData() {} }) }; } },
+        ImageData: FakeImageData, URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
+        Atomics, console
+    });
+    const status = new Int32Array(memory);
+    await r.Module.catchimExportBegin(2, 2, 30, 1, 'webm', 'project.webm', false, 64);
+    heap.fill(127, 1024, 1040);
+    await r.Module.catchimExportFrame(1024, 16, 0, 68, 256);
+    assert.equal(status[17], -1);
+    const error = new TextDecoder().decode(heap.subarray(256, 512)).split('\0')[0];
+    assert.equal(error, 'VideoEncoder rejected the first frame');
 });
 
 test('Qt browser export reports actionable secure-context and codec failures', async () => {

@@ -23,8 +23,29 @@
             const bitrate = Number.isFinite(requestedBitrate) && requestedBitrate > 0
                 ? Math.min(100_000_000, Math.max(1_000_000, Math.round(requestedBitrate)))
                 : Math.min(100_000_000, Math.max(1_000_000, automaticBitrate));
-            if (typeof api.canEncodeVideo === 'function' && !await api.canEncodeVideo(codec, { width, height, bitrate, frameRate: fps })) {
-                throw new Error(`${codec === 'avc' ? 'H.264/MP4' : 'VP9/WebM'} không được hỗ trợ ở ${width}×${height} ${fps} fps trên trình duyệt/thiết bị này. Hãy chọn độ phân giải thấp hơn hoặc định dạng WebM.`);
+            // Do not force a hardware encoder. Some browsers report the codec
+            // as available, then reject the first frame when hardware is
+            // explicitly preferred (common with headless/SwiftShader setups).
+            // Probe the exact WebCodecs configuration and keep the first
+            // supported acceleration mode, starting with the browser default.
+            let hardwareAcceleration = 'no-preference';
+            if (typeof api.canEncodeVideo === 'function') {
+                hardwareAcceleration = null;
+                for (const acceleration of ['no-preference', 'prefer-software', 'prefer-hardware']) {
+                    try {
+                        if (await api.canEncodeVideo(codec, {
+                            width, height, bitrate, frameRate: fps, hardwareAcceleration: acceleration
+                        })) {
+                            hardwareAcceleration = acceleration;
+                            break;
+                        }
+                    } catch (_) {
+                        // Try the next supported browser encoder mode.
+                    }
+                }
+                if (!hardwareAcceleration) {
+                    throw new Error(`${codec === 'avc' ? 'H.264/MP4' : 'VP9/WebM'} không được hỗ trợ ở ${width}×${height} ${fps} fps trên trình duyệt/thiết bị này. Hãy chọn độ phân giải thấp hơn hoặc định dạng WebM.`);
+                }
             }
             if (includeAudio && typeof api.canEncodeAudio === 'function' && !await api.canEncodeAudio(format === 'webm' ? 'opus' : 'aac', { numberOfChannels: 2, sampleRate: 48000, bitrate: 192_000 })) {
                 throw new Error(`Trình duyệt không hỗ trợ mã hóa âm thanh ${format === 'webm' ? 'Opus' : 'AAC'} cho định dạng này. Hãy tắt âm thanh hoặc chọn WebM.`);
@@ -42,7 +63,7 @@
             output = new api.Output({ format: format === 'webm' ? new api.WebMOutputFormat() : new api.Mp4OutputFormat(), target });
             videoSource = new api.CanvasSource(canvas, {
                 codec: format === 'webm' ? 'vp9' : 'avc', bitrate,
-                frameRate: fps, hardwareAcceleration: 'prefer-hardware', latencyMode: 'quality'
+                frameRate: fps, hardwareAcceleration, latencyMode: 'quality'
             });
             output.addVideoTrack(videoSource);
             if (includeAudio) {
@@ -72,13 +93,17 @@
             report(address, false);
         }
     };
-    Module.catchimExportFrame = async (pointer, length, frameIndex, address) => {
+    Module.catchimExportFrame = async (pointer, length, frameIndex, address, errorAddress = 0) => {
         try {
             const rgba = new Uint8ClampedArray(Module.HEAPU8.buffer, pointer, length).slice();
             context.putImageData(new ImageData(rgba, canvas.width, canvas.height), 0, 0);
             await videoSource.add(frameIndex / Module.catchimExportMeta.fps, 1 / Module.catchimExportMeta.fps);
             report(address, true);
-        } catch (error) { Module.catchimExportError = String(error); report(address, false); }
+        } catch (error) {
+            Module.catchimExportError = error?.message || String(error);
+            if (errorAddress && typeof stringToUTF8 === 'function') stringToUTF8(Module.catchimExportError, errorAddress, 1024);
+            report(address, false);
+        }
     };
     Module.catchimExportGpuFrame = async (descriptorPointer, layerCount, frameIndex, red, green, blue, address, errorAddress = 0) => {
         try {
@@ -87,13 +112,13 @@
             await videoSource.add(frameIndex / Module.catchimExportMeta.fps, 1 / Module.catchimExportMeta.fps);
             report(address, true);
         } catch (error) {
-            Module.catchimExportError = String(error);
+            Module.catchimExportError = error?.message || String(error);
             console.error("[Catchim] WebGPU export frame failed:", error);
             if (errorAddress && typeof stringToUTF8 === 'function') stringToUTF8(Module.catchimExportError, errorAddress, 1024);
             report(address, false);
         }
     };
-    Module.catchimExportAudio = async (pointer, samples, address) => {
+    Module.catchimExportAudio = async (pointer, samples, address, errorAddress = 0) => {
         try {
             if (!audioSource) throw new Error('Audio track chưa được khởi tạo.');
             const frames = samples / 2;
@@ -103,9 +128,13 @@
             for (let i = 0; i < frames; i++) { left[i] = source[i * 2]; right[i] = source[i * 2 + 1]; }
             await audioSource.add(buffer);
             report(address, true);
-        } catch (error) { Module.catchimExportError = String(error); report(address, false); }
+        } catch (error) {
+            Module.catchimExportError = error?.message || String(error);
+            if (errorAddress && typeof stringToUTF8 === 'function') stringToUTF8(Module.catchimExportError, errorAddress, 1024);
+            report(address, false);
+        }
     };
-    Module.catchimExportFinish = async (address) => {
+    Module.catchimExportFinish = async (address, errorAddress = 0) => {
         try {
             await output.finalize();
             if (!target.buffer) throw new Error('Không tạo được dữ liệu video.');
@@ -117,7 +146,11 @@
             Module.catchimExportFilename = meta.filename.split(/[\\/]/).pop() || `catchim.${formatName}`;
             videoSource.close(); if (audioSource) audioSource.close();
             report(address, true);
-        } catch (error) { Module.catchimExportError = String(error); report(address, false); }
+        } catch (error) {
+            Module.catchimExportError = error?.message || String(error);
+            if (errorAddress && typeof stringToUTF8 === 'function') stringToUTF8(Module.catchimExportError, errorAddress, 1024);
+            report(address, false);
+        }
     };
     // Browsers require a user gesture for a reliable download. Qt invokes this
     // from the completed export button, after the asynchronous encode finishes.

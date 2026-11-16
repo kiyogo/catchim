@@ -168,10 +168,14 @@ void ExportWorker::run() {
         return result == 1;
     };
     const QString format = savePath_.endsWith(".webm", Qt::CaseInsensitive) ? "webm" : "mp4";
+    // MAIN_THREAD_ASYNC_EM_ASM can run after this worker yields to the main
+    // thread. Keep the UTF-8 storage alive until the bridge has acknowledged
+    // initialization; passing format.toUtf8().constData() would dangle.
+    const QByteArray formatUtf8 = format.toUtf8();
     const QByteArray pathUtf8 = savePath_.toUtf8();
     MAIN_THREAD_ASYNC_EM_ASM({
         Module.catchimExportBegin($0, $1, $2, $3, UTF8ToString($4), UTF8ToString($5), !!$6, $7, $8, !!$9, $10, $11);
-    }, width_, height_, fps_, totalFrames_, format.toUtf8().constData(), pathUtf8.constData(), includeAudio_, &bridgeResult, &gpuExportStatus, gpuLayerExportCompatible, bridgeError.data(), static_cast<int>(videoBitrate_));
+    }, width_, height_, fps_, totalFrames_, formatUtf8.constData(), pathUtf8.constData(), includeAudio_, &bridgeResult, &gpuExportStatus, gpuLayerExportCompatible, bridgeError.data(), static_cast<int>(videoBitrate_));
     if (!waitBridge("Không khởi động được bộ xuất WebCodecs.")) return;
     const bool gpuExport = gpuExportStatus.load(std::memory_order_acquire) == 1;
     renderer.setGpuLayerMode(gpuExport);
@@ -220,11 +224,9 @@ void ExportWorker::run() {
             if (background.type == editor::ProjectBackground::Type::Color && background.color.size() == 7 && background.color[0] == '#') {
                 try { red=std::stoi(background.color.substr(1,2),nullptr,16)/255.f; green=std::stoi(background.color.substr(3,2),nullptr,16)/255.f; blue=std::stoi(background.color.substr(5,2),nullptr,16)/255.f; } catch (...) {}
             }
-            char gpuError[1024]{};
             MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportGpuFrame($0, $1, $2, $3, $4, $5, $6, $7); },
-                descriptors.empty() ? nullptr : descriptors.data(), static_cast<int>(descriptors.size()), frame, red, green, blue, &bridgeResult, gpuError);
+                descriptors.empty() ? nullptr : descriptors.data(), static_cast<int>(descriptors.size()), frame, red, green, blue, &bridgeResult, bridgeError.data());
             if (!waitBridge("WebCodecs không nhận được frame video.")) {
-                if (gpuError[0]) emit logOutputReceived(QStringLiteral("GPU/WebCodecs: ") + QString::fromUtf8(gpuError));
                 MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); });
                 return;
             }
@@ -233,7 +235,7 @@ void ExportWorker::run() {
                 MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); });
                 emit exportFinished(false, "Frame dựng không đúng kích thước."); return;
             }
-            MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportFrame($0, $1, $2, $3); }, rendered.rgbaPixels.data(), rendered.rgbaPixels.size(), frame, &bridgeResult);
+            MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportFrame($0, $1, $2, $3, $4); }, rendered.rgbaPixels.data(), rendered.rgbaPixels.size(), frame, &bridgeResult, bridgeError.data());
         }
         if (!gpuExport && !waitBridge("WebCodecs không nhận được frame video.")) {
             MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); }); return;
@@ -245,7 +247,7 @@ void ExportWorker::run() {
             if (!timeline) { emit exportFinished(false, "Không có timeline để xuất âm thanh."); return; }
             const auto pcm = audioMixer.renderAudioSlice(*timeline, core::TimelineTime::fromSeconds(audioRenderedFrames / fps_), core::TimelineTime::fromSeconds(chunkFrames / fps_), 48000, &mediaLibrary_);
             if (!pcm.samples().empty()) {
-                MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportAudio($0, $1, $2); }, pcm.samples().data(), pcm.samples().size(), &bridgeResult);
+                MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportAudio($0, $1, $2, $3); }, pcm.samples().data(), pcm.samples().size(), &bridgeResult, bridgeError.data());
                 if (!waitBridge("Không thể mã hóa âm thanh.")) { MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); }); return; }
             }
             audioRenderedFrames += chunkFrames;
@@ -262,7 +264,7 @@ void ExportWorker::run() {
             lastReported = frame + 1; lastReport = now;
         }
     }
-    MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportFinish($0); }, &bridgeResult);
+    MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportFinish($0, $1); }, &bridgeResult, bridgeError.data());
     if (!waitBridge("Không hoàn tất hoặc tải được file video.")) return;
     emit progressUpdated(totalFrames_, totalFrames_, totalFrames_ / std::max(.001, std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()), 100);
     emit exportFinished(true, "Video đã sẵn sàng để tải xuống.");
