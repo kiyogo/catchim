@@ -188,7 +188,8 @@ const CompositorOutput& RenderEngine::renderFrame(
         const auto transitionType = clip.getParam<std::string>("transition.type", "");
         const double transitionDuration = std::clamp(
             clip.getParam<double>("transition.duration", 0.0), 0.0, clip.duration().toSeconds());
-        const bool fadeIn = transitionType == "Fade In" || transitionType == "Fade In/Out";
+        const bool fadeIn = transitionType == "Fade In" || transitionType == "Fade In/Out" ||
+                            transitionType == "Cross Dissolve";
         const bool fadeOut = transitionType == "Fade Out" || transitionType == "Fade In/Out";
         if (transitionDuration > 0.0 && (fadeIn || fadeOut)) {
             const double fadeLength = transitionType == "Fade In/Out"

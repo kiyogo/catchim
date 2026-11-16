@@ -1694,6 +1694,7 @@ QWidget* AssetsPanel::createTransitionsView() {
     };
 
     std::vector<TransitionItem> transList = {
+        {"Cross Dissolve", "Hòa trộn hai clip hình ảnh đang chồng lên nhau", UiIcon::Transitions},
         {"Fade In", "Làm clip hiện dần từ trong suốt", UiIcon::Transitions},
         {"Fade Out", "Làm clip mờ dần trước khi kết thúc", UiIcon::Contrast},
         {"Fade In/Out", "Làm clip hiện dần ở đầu và mờ dần ở cuối", UiIcon::Transitions}
@@ -2847,6 +2848,80 @@ void AssetsPanel::onApplyEffectPreset(const QString& effectName) {
 
 void AssetsPanel::onApplyTransitionPreset(const QString& name, double durationSec) {
     const auto& sel = engine_.selectedClips();
+
+    if (name == "Cross Dissolve") {
+        auto* tl = engine_.activeTimeline();
+        const auto invalidSelection = [this] {
+            QMessageBox::information(
+                this,
+                "Chuyển cảnh",
+                "Cross Dissolve cần đúng hai clip hình ảnh không khóa, có thời gian chồng lên nhau và clip đi vào nằm trên clip đi ra.");
+        };
+        if (!tl || sel.size() != 2) {
+            invalidSelection();
+            return;
+        }
+
+        const auto* firstClip = tl->findClip(sel[0]);
+        const auto* secondClip = tl->findClip(sel[1]);
+        const auto* firstTrack = tl->findTrackContainingClip(sel[0]);
+        const auto* secondTrack = tl->findTrackContainingClip(sel[1]);
+        if (!firstClip || !secondClip || !firstTrack || !secondTrack ||
+            firstTrack->isLocked() || secondTrack->isLocked() ||
+            firstTrack->isHidden() || secondTrack->isHidden() ||
+            firstClip->isHidden() || secondClip->isHidden() ||
+            !editor::ElementUtils::isVisualElement(*firstClip) ||
+            !editor::ElementUtils::isVisualElement(*secondClip) ||
+            firstClip->startTime() == secondClip->startTime()) {
+            invalidSelection();
+            return;
+        }
+
+        const editor::Clip* outgoing = firstClip;
+        const editor::Track* outgoingTrack = firstTrack;
+        const editor::Clip* incoming = secondClip;
+        const editor::Track* incomingTrack = secondTrack;
+        if (secondClip->startTime() < firstClip->startTime()) {
+            outgoing = secondClip;
+            outgoingTrack = secondTrack;
+            incoming = firstClip;
+            incomingTrack = firstTrack;
+        }
+
+        const auto overlapEnd = std::min(outgoing->endTime(), incoming->endTime());
+        const auto overlap = overlapEnd - incoming->startTime();
+        const auto layerRank = [tl](const editor::Track* track) {
+            if (track == &tl->mainTrack()) return 0;
+            const auto& overlays = tl->overlayTracks();
+            for (std::size_t index = 0; index < overlays.size(); ++index) {
+                if (track == &overlays[index]) return static_cast<int>(index) + 1;
+            }
+            return -1;
+        };
+        if (overlap.ticks() <= 0 || layerRank(incomingTrack) <= layerRank(outgoingTrack)) {
+            invalidSelection();
+            return;
+        }
+
+        const double requestedSeconds = std::isfinite(durationSec)
+            ? std::clamp(durationSec, 0.05, 10.0)
+            : 0.5;
+        const auto requestedDuration = core::TimelineTime::fromSeconds(requestedSeconds);
+        const auto appliedDuration = std::min(requestedDuration, overlap);
+        editor::ElementPatch update{};
+        update.trackId = incomingTrack->id();
+        update.clipId = incoming->id();
+        update.patchParams["transition.type"] = "Cross Dissolve";
+        update.patchParams["transition.duration"] = appliedDuration.toSeconds();
+        if (!engine_.history().execute(std::make_unique<editor::UpdateElementsCommand>(
+                *tl, std::vector<editor::ElementPatch>{std::move(update)}))) {
+            return;
+        }
+        engine_.project().setDirty(true);
+        engine_.notifyTimelineChanged();
+        return;
+    }
+
     if (sel.empty()) {
         QMessageBox::information(this,"Chuyển cảnh","Hãy chọn phần tử hình ảnh trên dòng thời gian trước.");
         return;
