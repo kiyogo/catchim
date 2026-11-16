@@ -43,6 +43,7 @@ private:
     QPushButton* dupBtn_{nullptr};
     QPushButton* bookmarkBtn_{nullptr};
     QPushButton* sceneCutsBtn_{nullptr};
+    QPushButton* curveBtn_{nullptr};
     bool isDetectingSceneCuts_{false};
     QPushButton* sceneLabelBtn_{nullptr};
     QPushButton* sceneLayersBtn_{nullptr};

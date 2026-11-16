@@ -5,9 +5,22 @@
 #include "ui/theme/Theme.h"
 #include "ui/widgets/ScenesDrawer.h"
 #include "media/decoder/NativeVideoDecoder.h"
+#include "editor/animation/AnimationValueResolvers.h"
+#include "editor/animation/GraphEditorSessionEngine.h"
+#include "editor/history/commands/KeyframeCommands.h"
 #include "editor/history/commands/BatchCommand.h"
 #include "editor/history/commands/ProjectCommands.h"
 #include <QHBoxLayout>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QGridLayout>
+#include <QLabel>
+#include <QLineF>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
+#include <QVBoxLayout>
 #include <QMenu>
 #include <QSignalBlocker>
 #include <QMessageBox>
@@ -18,6 +31,8 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <iterator>
+#include <utility>
 #include <vector>
 
 namespace catchim::ui {
@@ -39,6 +54,242 @@ struct SceneCutAnalysis {
     std::vector<SceneCutSuggestion> suggestions;
     QString error;
 };
+
+using NormalizedCurve = editor::NormalizedCubicBezier;
+
+struct EditableCurveSegment {
+    QString label;
+    std::string propertyPath;
+    core::TimelineTime keyframeTime{0};
+    NormalizedCurve original;
+    NormalizedCurve curve;
+    double referenceSpanValue{1.0};
+};
+
+bool curvesEqual(const NormalizedCurve& a, const NormalizedCurve& b) {
+    constexpr double epsilon = 1e-6;
+    return std::abs(a.x1 - b.x1) < epsilon && std::abs(a.y1 - b.y1) < epsilon &&
+        std::abs(a.x2 - b.x2) < epsilon && std::abs(a.y2 - b.y2) < epsilon;
+}
+
+class BezierCurveWidget final : public QWidget {
+public:
+    explicit BezierCurveWidget(QWidget* parent = nullptr) : QWidget(parent) {
+        setMinimumSize(220, 136);
+        setMouseTracking(true);
+        setCursor(Qt::CrossCursor);
+    }
+
+    void setCurve(const NormalizedCurve& curve) {
+        curve_ = curve;
+        update();
+    }
+
+    const NormalizedCurve& curve() const noexcept { return curve_; }
+    std::function<void(const NormalizedCurve&)> onCurveChanged;
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF plot(14.0, 10.0, std::max(1, width() - 28), std::max(1, height() - 20));
+        painter.fillRect(rect(), palette().window());
+        painter.fillRect(plot, palette().alternateBase());
+        painter.setPen(palette().mid().color());
+        painter.drawRect(plot);
+
+        const auto mapPoint = [&plot](double x, double y) {
+            return QPointF(plot.left() + std::clamp(x, 0.0, 1.0) * plot.width(),
+                           plot.top() + (1.0 - y) * plot.height());
+        };
+        const QPointF p0 = mapPoint(0.0, 0.0);
+        const QPointF p3 = mapPoint(1.0, 1.0);
+        const QPointF c1 = mapPoint(curve_.x1, std::clamp(curve_.y1, 0.0, 1.0));
+        const QPointF c2 = mapPoint(curve_.x2, std::clamp(curve_.y2, 0.0, 1.0));
+
+        QPen guide(palette().mid().color(), 1.0, Qt::DashLine);
+        painter.setPen(guide);
+        painter.drawLine(p0, p3);
+
+        QPen handles(QColor("#38bdf8"), 1.0);
+        handles.setColor(QColor(56, 189, 248, 130));
+        painter.setPen(handles);
+        painter.drawLine(p0, c1);
+        painter.drawLine(p3, c2);
+
+        QPainterPath path;
+        path.moveTo(p0);
+        path.cubicTo(mapPoint(curve_.x1, curve_.y1), mapPoint(curve_.x2, curve_.y2), p3);
+        painter.setPen(QPen(QColor("#0ea5e9"), 2.0, Qt::SolidLine, Qt::RoundCap));
+        painter.drawPath(path);
+
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(palette().text().color());
+        painter.drawEllipse(p0, 2.0, 2.0);
+        painter.drawEllipse(p3, 2.0, 2.0);
+        painter.setBrush(QColor("#0ea5e9"));
+        painter.setPen(QPen(Qt::white, 1.0));
+        painter.drawEllipse(c1, 4.0, 4.0);
+        painter.drawEllipse(c2, 4.0, 4.0);
+    }
+
+    void mousePressEvent(QMouseEvent* event) override {
+        if (event->button() != Qt::LeftButton) return;
+        const auto [c1, c2] = handlePoints();
+        const QPointF position = event->position();
+        const double d1 = QLineF(position, c1).length();
+        const double d2 = QLineF(position, c2).length();
+        if (d1 <= 12.0 && d1 <= d2) activeHandle_ = 1;
+        else if (d2 <= 12.0) activeHandle_ = 2;
+        else return;
+        setCursor(Qt::ClosedHandCursor);
+        event->accept();
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if (activeHandle_ == 0) {
+            const auto [c1, c2] = handlePoints();
+            const QPointF position = event->position();
+            setCursor(QLineF(position, c1).length() < 12.0 || QLineF(position, c2).length() < 12.0
+                ? Qt::OpenHandCursor : Qt::CrossCursor);
+            return;
+        }
+        const QRectF plot(14.0, 10.0, std::max(1, width() - 28), std::max(1, height() - 20));
+        const QPointF position = event->position();
+        const double x = std::clamp((position.x() - plot.left()) / plot.width(), 0.0, 1.0);
+        double y = std::clamp(1.0 - (position.y() - plot.top()) / plot.height(), -0.5, 1.5);
+        if (!(event->modifiers() & Qt::ShiftModifier)) {
+            if (std::abs(y) < 0.06) y = 0.0;
+            else if (std::abs(y - 1.0) < 0.06) y = 1.0;
+        }
+        if (activeHandle_ == 1) { curve_.x1 = x; curve_.y1 = y; }
+        else { curve_.x2 = x; curve_.y2 = y; }
+        update();
+        if (onCurveChanged) onCurveChanged(curve_);
+        event->accept();
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton && activeHandle_ != 0) {
+            activeHandle_ = 0;
+            setCursor(Qt::OpenHandCursor);
+            event->accept();
+        }
+    }
+
+private:
+    std::pair<QPointF, QPointF> handlePoints() const {
+        const QRectF plot(14.0, 10.0, std::max(1, width() - 28), std::max(1, height() - 20));
+        const auto mapPoint = [&plot](double x, double y) {
+            return QPointF(plot.left() + std::clamp(x, 0.0, 1.0) * plot.width(),
+                           plot.top() + (1.0 - std::clamp(y, 0.0, 1.0)) * plot.height());
+        };
+        return {mapPoint(curve_.x1, curve_.y1), mapPoint(curve_.x2, curve_.y2)};
+    }
+
+    NormalizedCurve curve_;
+    int activeHandle_{0};
+};
+
+class CurveEditorDialog final : public QDialog {
+public:
+    explicit CurveEditorDialog(std::vector<EditableCurveSegment> segments, QWidget* parent = nullptr)
+        : QDialog(parent), segments_(std::move(segments)) {
+        setWindowTitle(QStringLiteral("Chỉnh đường cong easing"));
+        setModal(true);
+        setMinimumWidth(310);
+        auto* root = new QVBoxLayout(this);
+        root->setContentsMargins(14, 14, 14, 12);
+        root->setSpacing(10);
+
+        auto* selectorLabel = new QLabel(QStringLiteral("Thuộc tính và đoạn keyframe"), this);
+        root->addWidget(selectorLabel);
+        segmentPicker_ = new QComboBox(this);
+        for (const auto& segment : segments_) segmentPicker_->addItem(segment.label);
+        root->addWidget(segmentPicker_);
+
+        graph_ = new BezierCurveWidget(this);
+        root->addWidget(graph_);
+        graph_->onCurveChanged = [this](const NormalizedCurve& curve) {
+            if (activeIndex_ >= 0 && activeIndex_ < static_cast<int>(segments_.size())) {
+                segments_[activeIndex_].curve = curve;
+            }
+        };
+
+        auto* presetLabel = new QLabel(QStringLiteral("Preset"), this);
+        root->addWidget(presetLabel);
+        auto* presets = new QGridLayout;
+        presets->setSpacing(4);
+        const std::vector<std::pair<QString, NormalizedCurve>> values = {
+            {QStringLiteral("Smooth"), {0.25, 0.1, 0.25, 1.0}},
+            {QStringLiteral("Ease out"), {0.0, 0.0, 0.2, 1.0}},
+            {QStringLiteral("Ease in"), {0.8, 0.0, 1.0, 1.0}},
+            {QStringLiteral("In out"), {0.4, 0.0, 0.2, 1.0}},
+            {QStringLiteral("Pop"), {0.175, 0.885, 0.32, 1.275}},
+            {QStringLiteral("Linear"), {0.0, 0.0, 1.0, 1.0}}
+        };
+        for (size_t i = 0; i < values.size(); ++i) {
+            auto* preset = new QPushButton(values[i].first, this);
+            preset->setFixedHeight(28);
+            presets->addWidget(preset, static_cast<int>(i / 3), static_cast<int>(i % 3));
+            connect(preset, &QPushButton::clicked, this, [this, curve = values[i].second] {
+                graph_->setCurve(curve);
+                if (activeIndex_ >= 0 && activeIndex_ < static_cast<int>(segments_.size())) {
+                    segments_[activeIndex_].curve = curve;
+                }
+            });
+        }
+        root->addLayout(presets);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
+        buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Áp dụng"));
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        root->addWidget(buttons);
+
+        connect(segmentPicker_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+            activeIndex_ = index;
+            if (index >= 0 && index < static_cast<int>(segments_.size())) graph_->setCurve(segments_[index].curve);
+        });
+        if (!segments_.empty()) graph_->setCurve(segments_.front().curve);
+    }
+
+    const std::vector<EditableCurveSegment>& segments() const noexcept { return segments_; }
+
+private:
+    std::vector<EditableCurveSegment> segments_;
+    QComboBox* segmentPicker_{nullptr};
+    BezierCurveWidget* graph_{nullptr};
+    int activeIndex_{0};
+};
+
+std::vector<EditableCurveSegment> collectEditableCurves(const editor::Clip& clip) {
+    std::vector<EditableCurveSegment> segments;
+    for (const auto& [path, channel] : clip.animationChannels()) {
+        const auto& keys = channel.keyframes();
+        for (size_t i = 0; i + 1 < keys.size(); ++i) {
+            const auto& key = keys[i];
+            if (key.interpolation == editor::KeyframeInterpolation::Hold) continue;
+            const NormalizedCurve curve = key.interpolation == editor::KeyframeInterpolation::Linear
+                ? NormalizedCurve{0.0, 0.0, 1.0, 1.0}
+                : NormalizedCurve{key.bezierX1, key.bezierY1, key.bezierX2, key.bezierY2};
+            const auto start = key.time.toSeconds();
+            const auto end = keys[i + 1].time.toSeconds();
+            segments.push_back({
+                QStringLiteral("%1 · %2–%3 s")
+                    .arg(QString::fromStdString(path))
+                    .arg(start, 0, 'f', 2)
+                    .arg(end, 0, 'f', 2),
+                path,
+                key.time,
+                curve,
+                curve,
+                editor::GraphEditorSessionEngine::getReferenceSpanValue(channel, i)
+            });
+        }
+    }
+    return segments;
+}
 
 SceneCutAnalysis detectSceneCuts(
     const std::filesystem::path& path,
@@ -291,8 +542,64 @@ void TimelineToolbar::setupUi() {
         refresh();
     });
 
-    auto* curveBtn = makeIconBtn(UiIcon::Chart, "Trình chỉnh sửa đường cong");
-    curveBtn->setEnabled(false);
+    curveBtn_ = makeIconBtn(UiIcon::Chart, "Chỉnh easing cho keyframe");
+    connect(curveBtn_, &QPushButton::clicked, this, [this]() {
+        auto* timeline = engine_.activeTimeline();
+        const auto& selected = engine_.selectedClips();
+        if (!timeline || selected.size() != 1) return;
+        const auto clipId = selected.front();
+        const auto* clip = timeline->findClip(clipId);
+        const auto* track = timeline->findTrackContainingClip(clipId);
+        if (!clip || !track) return;
+        auto segments = collectEditableCurves(*clip);
+        if (segments.empty()) return;
+
+        const auto trackId = track->id();
+        const auto projectId = engine_.project().metadata().id;
+        const auto sceneId = engine_.project().currentSceneId();
+        auto applyCurves = [this, clipId, trackId, projectId, sceneId](const std::vector<EditableCurveSegment>& edited) {
+            auto* currentTimeline = engine_.activeTimeline();
+            if (!currentTimeline || engine_.project().metadata().id != projectId ||
+                engine_.project().currentSceneId() != sceneId) {
+                return;
+            }
+            auto* currentClip = currentTimeline->findClip(clipId);
+            const auto* currentTrack = currentTimeline->findTrackContainingClip(clipId);
+            if (!currentClip || !currentTrack || currentTrack->id() != trackId) return;
+
+            auto batch = std::make_unique<editor::BatchCommand>("Edit easing curves");
+            for (const auto& segment : edited) {
+                if (curvesEqual(segment.original, segment.curve)) continue;
+                const auto* channel = currentClip->findAnimationChannel(segment.propertyPath);
+                if (!channel) continue;
+                const auto& keys = channel->keyframes();
+                const auto key = std::find_if(keys.begin(), keys.end(), [&](const editor::Keyframe& item) {
+                    return item.time == segment.keyframeTime;
+                });
+                if (key == keys.end() || std::next(key) == keys.end()) continue;
+                const auto handles = editor::AnimationValueResolvers::getCurveHandlesForNormalizedCubicBezier(
+                    *key, *std::next(key), segment.curve, segment.referenceSpanValue);
+                if (!handles) continue;
+                batch->addCommand(std::make_unique<editor::UpdateKeyframeCurveCommand>(
+                    *currentTimeline, trackId, clipId, segment.propertyPath, segment.keyframeTime,
+                    editor::KeyframeInterpolation::Bezier, handles->leftHandle, handles->rightHandle,
+                    segment.curve.x1, segment.curve.y1, segment.curve.x2, segment.curve.y2));
+            }
+
+            if (!batch->empty() && engine_.history().execute(std::move(batch))) {
+                engine_.project().setDirty(true);
+                engine_.notifyTimelineChanged();
+                refresh();
+            }
+        };
+
+        auto* dialog = new CurveEditorDialog(std::move(segments), window());
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        connect(dialog, &QDialog::accepted, this, [dialog, applyCurves] {
+            applyCurves(dialog->segments());
+        });
+        dialog->open();
+    });
 
     layout->addWidget(splitBtn_);
     layout->addWidget(splitLeftBtn_);
@@ -304,7 +611,7 @@ void TimelineToolbar::setupUi() {
     layout->addWidget(deleteBtn_);
     layout->addWidget(leftSep);
     layout->addWidget(bookmarkBtn_);
-    layout->addWidget(curveBtn);
+    layout->addWidget(curveBtn_);
 
     root->addWidget(leftTools, 0, Qt::AlignLeft);
     root->addStretch();
@@ -402,6 +709,7 @@ void TimelineToolbar::refresh() {
         ?mediaLibrary_.findAsset(clip->mediaId()):nullptr;
     sceneCutsBtn_->setEnabled(clipAsset && clipAsset->hasVideo() && !isDetectingSceneCuts_);
     if (!isDetectingSceneCuts_) sceneCutsBtn_->setToolTip("Dò điểm chuyển cảnh trên video đã chọn");
+    curveBtn_->setEnabled(clip && !collectEditableCurves(*clip).empty());
     unlinkBtn_->setEnabled(clip&&clip->type()==editor::ClipType::Video&&clip->getParam<bool>("hasAudio",true));
     const bool hasSelection=!selected.empty();splitBtn_->setEnabled(hasSelection);splitLeftBtn_->setEnabled(hasSelection);splitRightBtn_->setEnabled(hasSelection);dupBtn_->setEnabled(hasSelection);deleteBtn_->setEnabled(hasSelection);
     if (timeline) {
@@ -421,6 +729,7 @@ void TimelineToolbar::refresh() {
     if (unlinkBtn_) unlinkBtn_->setIcon(UiIcons::get(UiIcon::Link, pal.textPrimary, 16));
     if (dupBtn_) dupBtn_->setIcon(UiIcons::get(UiIcon::Duplicate, pal.textPrimary, 16));
     if (sceneCutsBtn_) sceneCutsBtn_->setIcon(UiIcons::get(UiIcon::Video, pal.textPrimary, 16));
+    if (curveBtn_) curveBtn_->setIcon(UiIcons::get(UiIcon::Chart, pal.textPrimary, 16));
     if (deleteBtn_) deleteBtn_->setIcon(UiIcons::get(UiIcon::Delete, pal.textPrimary, 16));
     if (bookmarkBtn_) bookmarkBtn_->setIcon(UiIcons::get(UiIcon::Bookmark, pal.textPrimary, 16));
     if (snapBtn_) snapBtn_->setIcon(UiIcons::get(UiIcon::Magnet, snapBtn_->isChecked() ? activeIconCol : pal.textPrimary, 16));
