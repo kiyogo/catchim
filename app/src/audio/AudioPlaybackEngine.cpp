@@ -1,8 +1,11 @@
 #include "audio/AudioPlaybackEngine.h"
+#include "audio/AudioRetimeEngine.h"
+#include "editor/retime/RetimeEngine.h"
 #include "media/MediaLibrary.h"
 #include "media/decoder/NativeAudioDecoder.h"
 #include <cmath>
 #include <algorithm>
+#include <utility>
 
 namespace catchim::audio {
 
@@ -60,6 +63,77 @@ std::vector<float> AudioPlaybackEngine::buildWaveformGainSamples(
 
 AudioPlaybackEngine::AudioPlaybackEngine() = default;
 
+std::shared_ptr<const AudioBuffer> AudioPlaybackEngine::getPitchPreservedBuffer(
+    const editor::Clip& clip,
+    const std::filesystem::path& sourcePath,
+    double rate,
+    int sampleRate,
+    const std::unordered_set<std::string>& activePitchClipIds
+) {
+    const std::string clipId = clip.id().str();
+    const std::string sourceKey = sourcePath.string();
+    const int64_t trimStartTicks = clip.trimStart().ticks();
+    const int64_t durationTicks = clip.duration().ticks();
+    const auto matches = [&](const PreparedPitchBuffer& entry) {
+        return entry.sourcePath == sourceKey && entry.trimStartTicks == trimStartTicks &&
+            entry.durationTicks == durationTicks && entry.sampleRate == sampleRate &&
+            std::abs(entry.rate - rate) <= AudioRetimeEngine::RATE_EPSILON;
+    };
+
+    {
+        std::lock_guard lock(pitchBufferMutex_);
+        const auto it = pitchBuffers_.find(clipId);
+        if (it != pitchBuffers_.end() && matches(it->second)) {
+            it->second.lastUsed = ++pitchBufferClock_;
+            return it->second.buffer;
+        }
+    }
+
+    auto decoded = media::NativeAudioDecoder::instance().getAudioBuffer(sourcePath, sampleRate, 2);
+    if (!decoded || decoded->empty()) return nullptr;
+
+    AudioBuffer source(2, sampleRate);
+    source.samples() = *decoded;
+    auto prepared = std::make_shared<AudioBuffer>(AudioRetimeEngine::renderRetimedBuffer(
+        source, clip.trimStart().toSeconds(), clip.duration().toSeconds(), rate, true, sampleRate));
+    const size_t preparedBytes = prepared->samples().size() * sizeof(float);
+
+    std::lock_guard lock(pitchBufferMutex_);
+    if (const auto it = pitchBuffers_.find(clipId); it != pitchBuffers_.end()) {
+        if (matches(it->second)) {
+            it->second.lastUsed = ++pitchBufferClock_;
+            return it->second.buffer;
+        }
+        pitchBufferBytes_ -= std::min(pitchBufferBytes_, it->second.byteSize);
+        pitchBuffers_.erase(it);
+    }
+
+    constexpr size_t cacheBudgetBytes = 128u * 1024u * 1024u;
+    while (!pitchBuffers_.empty() && pitchBufferBytes_ + preparedBytes > cacheBudgetBytes) {
+        auto oldest = pitchBuffers_.end();
+        for (auto it = pitchBuffers_.begin(); it != pitchBuffers_.end(); ++it) {
+            if (activePitchClipIds.contains(it->first)) continue;
+            if (oldest == pitchBuffers_.end() || it->second.lastUsed < oldest->second.lastUsed) oldest = it;
+        }
+        if (oldest == pitchBuffers_.end()) break;
+        pitchBufferBytes_ -= std::min(pitchBufferBytes_, oldest->second.byteSize);
+        pitchBuffers_.erase(oldest);
+    }
+
+    PreparedPitchBuffer entry;
+    entry.sourcePath = sourceKey;
+    entry.trimStartTicks = trimStartTicks;
+    entry.durationTicks = durationTicks;
+    entry.rate = rate;
+    entry.sampleRate = sampleRate;
+    entry.byteSize = preparedBytes;
+    entry.lastUsed = ++pitchBufferClock_;
+    entry.buffer = prepared;
+    pitchBufferBytes_ += preparedBytes;
+    pitchBuffers_.emplace(clipId, std::move(entry));
+    return prepared;
+}
+
 AudioBuffer AudioPlaybackEngine::renderAudioSlice(
     const editor::Timeline& timeline,
     core::TimelineTime startTime,
@@ -81,6 +155,21 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
     core::TimelineTime endTime = startTime + duration;
 
     auto tracks = timeline.allTracks();
+    std::unordered_set<std::string> activePitchClipIds;
+    for (const auto* track : tracks) {
+        if (track->isMuted()) continue;
+        for (const auto& clip : track->clips()) {
+            if ((clip.type() != editor::ClipType::Audio && clip.type() != editor::ClipType::Video) ||
+                clip.isMuted() || clip.getParam<bool>("muted", false) ||
+                clip.startTime() + clip.duration() <= startTime || clip.startTime() >= endTime) continue;
+            if (clip.type() == editor::ClipType::Video && !clip.getParam<bool>("isSourceAudioEnabled", true)) continue;
+            const double clipRate = editor::RetimeEngine::clampRate(clip.getParam<double>("speed", 1.0));
+            if (clip.getParam<bool>("maintainPitch", false) &&
+                AudioRetimeEngine::shouldMaintainPitch(clipRate, true) &&
+                std::abs(clipRate - 1.0) > AudioRetimeEngine::RATE_EPSILON)
+                activePitchClipIds.insert(clip.id().str());
+        }
+    }
     for (const auto* track : tracks) {
         if (track->isMuted()) continue;
 
@@ -116,8 +205,10 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
                 return dBToLinear(volumeChannel->getValueAt(core::TimelineTime::fromSeconds(localSec)));
             };
 
-            double speed = clip.getParam<double>("speed", 1.0);
-            if (speed <= 0.01) speed = 1.0;
+            const double speed = editor::RetimeEngine::clampRate(clip.getParam<double>("speed", 1.0));
+            const bool maintainPitch = clip.getParam<bool>("maintainPitch", false) &&
+                AudioRetimeEngine::shouldMaintainPitch(speed, true) &&
+                std::abs(speed - 1.0) > AudioRetimeEngine::RATE_EPSILON;
             bool reversed = clip.getParam<bool>("reversed", false);
             double fadeIn = clip.getParam<double>("audio.fadeIn", 0.0);
             double fadeOut = clip.getParam<double>("audio.fadeOut", 0.0);
@@ -147,41 +238,50 @@ AudioBuffer AudioPlaybackEngine::renderAudioSlice(
             if (mediaLibrary && !clip.mediaId().isEmpty()) {
                 auto asset = mediaLibrary->findAsset(clip.mediaId());
                 if (asset && asset->hasAudio()) {
-                    auto pcmBuf = media::NativeAudioDecoder::instance().getAudioBuffer(asset->filePath(), sampleRate, 2);
-                    if (pcmBuf && !pcmBuf->empty()) {
-                        const auto& pcm = *pcmBuf;
-                        size_t totalSourceFrames = pcm.size() / 2;
+                    auto pitchPcm = maintainPitch
+                        ? getPitchPreservedBuffer(clip, asset->filePath(), speed, sampleRate, activePitchClipIds)
+                        : std::shared_ptr<const AudioBuffer>{};
+                    auto pcmBuf = pitchPcm ? std::shared_ptr<const std::vector<float>>{}
+                        : media::NativeAudioDecoder::instance().getAudioBuffer(asset->filePath(), sampleRate, 2);
+                    if ((pitchPcm && pitchPcm->frameCount() > 0) || (pcmBuf && !pcmBuf->empty())) {
+                        const auto& pcm = pitchPcm ? pitchPcm->samples() : *pcmBuf;
+                        const int pcmChannels = pitchPcm ? pitchPcm->channels() : 2;
+                        const size_t totalSourceFrames = pcm.size() / static_cast<size_t>(std::max(1, pcmChannels));
 
                         for (size_t i = 0; i < overlapFrames && (frameOffsetInSlice + i) < numFrames; ++i) {
                             size_t frameIdx = frameOffsetInSlice + i;
-                            double localSec = (overlapStart - clipStart).toSeconds() + static_cast<double>(i) / sampleRate;
+                            const double localSec = (overlapStart - clipStart).toSeconds() + static_cast<double>(i) / sampleRate;
 
-                            // Apply speed & reverse
-                            double sourceSec = 0.0;
-                            if (reversed) {
-                                double rem = clip.duration().toSeconds() - localSec;
-                                sourceSec = std::max(0.0, rem * speed + clip.trimStart().toSeconds());
-                            } else {
-                                sourceSec = localSec * speed + clip.trimStart().toSeconds();
-                            }
-
-                            // Fade in / Fade out envelope
                             double fadeFactor = 1.0;
-                            if (fadeIn > 0.001 && localSec < fadeIn) {
-                                fadeFactor = std::clamp(localSec / fadeIn, 0.0, 1.0);
-                            } else if (fadeOut > 0.001) {
-                                double remain = clip.duration().toSeconds() - localSec;
-                                if (remain < fadeOut) {
-                                    fadeFactor = std::clamp(remain / fadeOut, 0.0, 1.0);
-                                }
+                            if (fadeIn > 0.001 && localSec < fadeIn)
+                                fadeFactor = std::min(fadeFactor, std::clamp(localSec / fadeIn, 0.0, 1.0));
+                            if (fadeOut > 0.001) {
+                                const double remain = clip.duration().toSeconds() - localSec;
+                                if (remain < fadeOut)
+                                    fadeFactor = std::min(fadeFactor, std::clamp(remain / fadeOut, 0.0, 1.0));
                             }
-
                             fadeFactor *= transitionFadeAt(localSec);
-                            double effectiveGain = gainAtLocalTime(localSec) * fadeFactor;
-                            size_t srcFrameIdx = static_cast<size_t>(sourceSec * sampleRate);
-                            if (srcFrameIdx < totalSourceFrames) {
-                                outSamples[frameIdx * 2 + 0] += static_cast<float>(pcm[srcFrameIdx * 2 + 0] * effectiveGain);
-                                outSamples[frameIdx * 2 + 1] += static_cast<float>(pcm[srcFrameIdx * 2 + 1] * effectiveGain);
+                            const double effectiveGain = gainAtLocalTime(localSec) * fadeFactor;
+
+                            int64_t sourceIndex = -1;
+                            if (pitchPcm) {
+                                const double retimedTime = reversed
+                                    ? std::max(0.0, clip.duration().toSeconds() - localSec)
+                                    : localSec;
+                                sourceIndex = static_cast<int64_t>(std::floor(retimedTime * sampleRate));
+                                if (sourceIndex >= static_cast<int64_t>(totalSourceFrames))
+                                    sourceIndex = static_cast<int64_t>(totalSourceFrames) - 1;
+                            } else {
+                                const double sourceSec = reversed
+                                    ? std::max(0.0, (clip.duration().toSeconds() - localSec) * speed + clip.trimStart().toSeconds())
+                                    : localSec * speed + clip.trimStart().toSeconds();
+                                sourceIndex = static_cast<int64_t>(std::floor(sourceSec * sampleRate));
+                            }
+                            if (sourceIndex >= 0 && static_cast<size_t>(sourceIndex) < totalSourceFrames) {
+                                const size_t leftChannel = static_cast<size_t>(sourceIndex) * static_cast<size_t>(pcmChannels);
+                                const size_t rightChannel = leftChannel + static_cast<size_t>(std::min(1, pcmChannels - 1));
+                                outSamples[frameIdx * 2] += static_cast<float>(pcm[leftChannel] * effectiveGain);
+                                outSamples[frameIdx * 2 + 1] += static_cast<float>(pcm[rightChannel] * effectiveGain);
                             }
                         }
                         renderedRealAudio = true;

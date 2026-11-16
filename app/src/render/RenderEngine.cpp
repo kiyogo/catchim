@@ -1,4 +1,5 @@
 #include "RenderEngine.h"
+#include "editor/retime/RetimeEngine.h"
 #include "render/effects/ClipEffectRenderer.h"
 #include "render/RenderParamResolvers.h"
 #include "media/decoder/NativeVideoDecoder.h"
@@ -213,8 +214,7 @@ const CompositorOutput& RenderEngine::renderFrame(
         if (!clip.mediaId().isEmpty()) {
             auto asset = mediaLibrary.findAsset(clip.mediaId());
             if (asset) {
-                double speed = clip.getParam<double>("speed", 1.0);
-                if (speed <= 0.01) speed = 1.0;
+                const double speed = editor::RetimeEngine::clampRate(clip.getParam<double>("speed", 1.0));
                 bool reversed = clip.getParam<bool>("reversed", false);
 
                 double clipElapsed = 0.0;

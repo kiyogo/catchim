@@ -6,6 +6,7 @@
 namespace catchim::audio {
 
 double AudioRetimeEngine::clampRate(double rate) noexcept {
+    if (!std::isfinite(rate) || rate <= 0.0) return DEFAULT_RATE;
     return std::clamp(rate, MIN_RATE, MAX_RATE);
 }
 

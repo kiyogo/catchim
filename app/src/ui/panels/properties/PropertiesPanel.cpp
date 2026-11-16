@@ -228,6 +228,14 @@ void PropertiesPanel::setupUi() {
     connect(mute,&QCheckBox::toggled,this,[this](bool v){patch({{"muted",v}},v);});
     auto* speed=addTab("speed","Tốc độ",UiIcon::Speed);
     number(speed,"Tốc độ phát","speed",1,.01,5,.01);
+    auto* changePitch=new ToggleSwitch(content);changePitch->setObjectName("property_changePitch");
+    changePitch->setToolTip("Tắt để giữ cao độ khi thay đổi tốc độ");
+    field(speed,"Đổi cao độ",changePitch);
+    readers_.push_back([changePitch](const editor::Clip& c){
+        QSignalBlocker guard(changePitch);
+        changePitch->setChecked(!c.getParam<bool>("maintainPitch",false));
+    });
+    connect(changePitch,&QCheckBox::toggled,this,[this](bool change){patch({{"maintainPitch",!change}});});
     auto* reverse=new ToggleSwitch(content); field(speed,"Phát ngược",reverse);
     readers_.push_back([reverse](const editor::Clip& c){QSignalBlocker guard(reverse);reverse->setChecked(c.getParam<bool>("reversed",false));});
     connect(reverse,&QCheckBox::toggled,this,[this](bool v){patch({{"reversed",v}});});
