@@ -15,8 +15,8 @@ struct TextBackground {
     bool enabled{false};
     std::string color{"#000000"};
     double cornerRadius{0.0};
-    double paddingX{8.0};
-    double paddingY{4.0};
+    double paddingX{30.0};
+    double paddingY{42.0};
     double offsetX{0.0};
     double offsetY{0.0};
 
@@ -27,8 +27,8 @@ struct ResolvedTextBackground {
     bool enabled{false};
     std::string color{"#000000"};
     double cornerRadius{0.0};
-    double paddingX{8.0};
-    double paddingY{4.0};
+    double paddingX{30.0};
+    double paddingY{42.0};
     double offsetX{0.0};
     double offsetY{0.0};
 
@@ -57,8 +57,8 @@ class TextElementMeasurementEngine {
 public:
     static constexpr double CORNER_RADIUS_MIN = 0.0;
     static constexpr double CORNER_RADIUS_MAX = 100.0;
-    static constexpr double DEFAULT_PADDING_X = 8.0;
-    static constexpr double DEFAULT_PADDING_Y = 4.0;
+    static constexpr double DEFAULT_PADDING_X = 30.0;
+    static constexpr double DEFAULT_PADDING_Y = 42.0;
     static constexpr const char* DEFAULT_BACKGROUND_COLOR = "#000000";
 
     static TextBackground buildTextBackgroundFromParams(

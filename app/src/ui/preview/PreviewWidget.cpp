@@ -6,6 +6,9 @@
 #include <QMouseEvent>
 #include <QColor>
 #include <QFontMetricsF>
+#include <QTextLayout>
+#include <QTextOption>
+#include <QRect>
 #include <QLineF>
 #include "editor/history/commands/ElementCommands.h"
 #include <cmath>
@@ -84,15 +87,75 @@ static QSizeF webTextBounds(const editor::Clip& clip,int canvasW,int canvasH,cor
     };
     font.setLetterSpacing(QFont::AbsoluteSpacing,
         resolveTextNumber("text.letterSpacing","letterSpacing",0.0));
-    const QFontMetricsF metrics(font);
-    const auto bounds=metrics.boundingRect(QRectF(40,0,canvasW-80,canvasH),Qt::AlignCenter|Qt::TextWordWrap,QString::fromStdString(clip.getParam<std::string>("text.content",clip.name())));
-    const bool hasLineHeight=clip.hasParam("text.lineHeight")||clip.hasParam("lineHeight")||
+    const QString text=QString::fromStdString(clip.getParam<std::string>("text.content",clip.name()));
+    const auto style=clip.getParam<std::string>("text.style","regular");
+    QRect rect(40,0,outputW-80,outputH);
+    int flags=Qt::AlignHCenter|Qt::AlignVCenter|Qt::TextWordWrap;
+    if(style=="lower_third") {rect=QRect(60,outputH-160,outputW-120,100);flags=Qt::AlignLeft|Qt::AlignVCenter;}
+    else if(style=="regular") {rect=QRect(60,outputH-220,outputW-120,180);flags=Qt::AlignHCenter|Qt::AlignBottom|Qt::TextWordWrap;}
+    const auto align=clip.getParam<std::string>("text.textAlign","center");
+    flags&=~(Qt::AlignLeft|Qt::AlignRight|Qt::AlignHCenter);
+    flags|=align=="left"?Qt::AlignLeft:align=="right"?Qt::AlignRight:Qt::AlignHCenter;
+    const bool customTextLayout=clip.hasParam("text.letterSpacing")||clip.hasParam("letterSpacing")||
+        clip.hasParam("text.lineHeight")||clip.hasParam("lineHeight")||
+        clip.findAnimationChannel("text.letterSpacing")||clip.findAnimationChannel("letterSpacing")||
         clip.findAnimationChannel("text.lineHeight")||clip.findAnimationChannel("lineHeight");
-    if(!hasLineHeight||metrics.height()<=0.0)return bounds.size();
-    const double lineHeightRatio=std::clamp(
-        resolveTextNumber("text.lineHeight","lineHeight",1.2),0.1,10.0);
-    const int lineCount=std::max(1,qRound(bounds.height()/metrics.height()));
-    return {bounds.width(),lineCount*font.pixelSize()*lineHeightRatio};
+    QRectF textRect;
+    if(customTextLayout) {
+        QTextOption textOption;
+        textOption.setAlignment(Qt::Alignment(flags)&(Qt::AlignLeft|Qt::AlignHCenter|Qt::AlignRight));
+        textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        QTextLayout layout(text,font);layout.setTextOption(textOption);
+        const QFontMetricsF metrics(font);
+        const double lineHeightRatio=std::clamp(resolveTextNumber("text.lineHeight","lineHeight",1.2),0.1,10.0);
+        const qreal baseFontPixels=font.pixelSize()>0?font.pixelSize():metrics.height()/1.2;
+        const qreal lineAdvance=std::max<qreal>(1.0,baseFontPixels*lineHeightRatio);
+        int lineCount=0;layout.beginLayout();
+        while(true){auto line=layout.createLine();if(!line.isValid())break;line.setLineWidth(rect.width());line.setPosition(QPointF(0.0,lineCount*lineAdvance));++lineCount;}
+        layout.endLayout();
+        const qreal blockHeight=lineCount*lineAdvance;
+        qreal top=rect.top();
+        if(flags&Qt::AlignBottom)top+=rect.height()-blockHeight;
+        else if(flags&Qt::AlignVCenter)top+=(rect.height()-blockHeight)/2.0;
+        bool hasBounds=false;
+        for(int i=0;i<lineCount;++i) {
+            const auto lineBounds=layout.lineAt(i).naturalTextRect().translated(rect.left(),top);
+            if(lineBounds.isEmpty())continue;
+            textRect=hasBounds?textRect.united(lineBounds):lineBounds;hasBounds=true;
+        }
+    } else {
+        textRect=QFontMetricsF(font).boundingRect(QRectF(rect),flags,text);
+    }
+    QRectF textBounds(-textRect.width()/2.0,-textRect.height()/2.0,textRect.width(),textRect.height());
+    const double outputScaleX=static_cast<double>(outputW)/std::max(1,canvasW);
+    const double outputScaleY=static_cast<double>(outputH)/std::max(1,canvasH);
+    const auto toProjectBounds=[&](const QRectF& bounds) {
+        return QRectF(bounds.left()/outputScaleX,bounds.top()/outputScaleY,
+                      bounds.width()/outputScaleX,bounds.height()/outputScaleY);
+    };
+    if(!clip.getParam<bool>("background.enabled",false))
+        return toProjectBounds(textBounds);
+    const auto backgroundString=clip.getParam<std::string>("background.color","#000000");
+    QString cssColor=QString::fromStdString(backgroundString);
+    if(cssColor.size()==9&&cssColor.startsWith(QLatin1Char('#')))
+        cssColor=QStringLiteral("#")+cssColor.mid(7,2)+cssColor.mid(1,6);
+    const QColor backgroundColor(cssColor);
+    if(backgroundString=="transparent"||!backgroundColor.isValid()||backgroundColor.alpha()==0)
+        return toProjectBounds(textBounds);
+
+    const auto resolveBackgroundNumber=[&](const char* key,double fallback) {
+        if(const auto* channel=clip.findAnimationChannel(key);channel&&!channel->empty())
+            return channel->getValueAt(localTime);
+        return clip.getParam<double>(key,fallback);
+    };
+    const double fontSizeRatio=std::max(0.0,clip.getParam<double>("text.fontSize",15.0)/15.0);
+    const double paddingX=std::max(0.0,resolveBackgroundNumber("background.paddingX",30.0)*fontSizeRatio*outputScaleX);
+    const double paddingY=std::max(0.0,resolveBackgroundNumber("background.paddingY",42.0)*fontSizeRatio*outputScaleY);
+    const double offsetX=resolveBackgroundNumber("background.offsetX",0.0)*outputScaleX;
+    const double offsetY=resolveBackgroundNumber("background.offsetY",0.0)*outputScaleY;
+    const auto visualBounds=textBounds.united(textBounds.adjusted(-paddingX+offsetX,-paddingY+offsetY,
+                                                                   paddingX+offsetX,paddingY+offsetY));
+    return toProjectBounds(visualBounds);
 }
 
 PreviewWidget::PreviewWidget(
@@ -153,6 +216,8 @@ PreviewWidget::SelectionGeometry PreviewWidget::selectionGeometry() const {
                     clip->getParam<double>("transform.scaleY",1)*oy);
 
     QSizeF source(cw, ch);
+    QRectF localBounds;
+    bool hasExplicitLocalBounds=false;
     if (clip->type() == editor::ClipType::Video || clip->type() == editor::ClipType::Image || clip->type() == editor::ClipType::Sticker) {
         const auto asset = mediaLibrary_.findAsset(clip->mediaId());
         if (!asset || asset->width() <= 0 || asset->height() <= 0) return {};
@@ -160,15 +225,22 @@ PreviewWidget::SelectionGeometry PreviewWidget::selectionGeometry() const {
         source = QSizeF(asset->width(), asset->height());
     } else if (clip->type() == editor::ClipType::Text) {
         // Retain the native text layout's measured selection extent.
-        source = clip->getParam<bool>("text.webLayout",false)
-            ? webTextBounds(*clip,cw,ch,engine_.playback().currentTime()-clip->startTime())
-            : QSizeF(240,100);
+        if(clip->getParam<bool>("text.webLayout",false)) {
+            localBounds=webTextBounds(*clip,output.width(),output.height(),cw,ch,
+                                      engine_.playback().currentTime()-clip->startTime());
+            source=localBounds.size();
+            hasExplicitLocalBounds=true;
+        } else {
+            source=QSizeF(240,100);
+        }
     } else if (clip->type() == editor::ClipType::Graphic) {
         const double size = std::min(output.width(),output.height())/4;
         const auto shape = clip->getParam<std::string>("graphic.shape","rectangle");
         source = shape == "rectangle" ? QSizeF(2*size/ox,size/oy) : QSizeF(size/ox,size/oy);
     }
-    geometry.localBounds = QRectF(-source.width()/2,-source.height()/2,source.width(),source.height());
+    geometry.localBounds = hasExplicitLocalBounds
+        ? localBounds
+        : QRectF(-source.width()/2,-source.height()/2,source.width(),source.height());
     const auto& r = geometry.localBounds;
     geometry.outline = transform.map(QPolygonF{r.topLeft(),r.topRight(),r.bottomRight(),r.bottomLeft()});
     geometry.handles = {transform.map(r.topLeft()),transform.map(QPointF(0,r.top())),transform.map(r.topRight()),

@@ -8,9 +8,21 @@
 #include <QPainterPath>
 #include <QSignalBlocker>
 #include <functional>
+#include <memory>
 #include <algorithm>
 #include <array>
 namespace catchim::ui {
+inline QColor editorColorFromCss(QString value) {
+    if(value.size()==9&&value.startsWith(QLatin1Char('#')))
+        value=QStringLiteral("#")+value.mid(7,2)+value.mid(1,6);
+    return QColor(value);
+}
+inline QString editorColorToCss(const QColor& color,bool includeAlpha=false) {
+    if(!includeAlpha||color.alpha()==255)return color.name(QColor::HexRgb).toUpper();
+    return QString("#%1%2%3%4")
+        .arg(color.red(),2,16,QChar('0')).arg(color.green(),2,16,QChar('0'))
+        .arg(color.blue(),2,16,QChar('0')).arg(color.alpha(),2,16,QChar('0')).toUpper();
+}
 class EditorColorPlane : public QWidget {
 public:
     EditorColorPlane(QWidget* parent):QWidget(parent){setObjectName("editorColorPlane");setMinimumHeight(180);setCursor(Qt::CrossCursor);}
@@ -26,36 +38,97 @@ protected:
         const QPointF point(r.left()+color.hsvSaturationF()*r.width(),r.top()+(1-color.valueF())*r.height());
         p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(0,0,0,150),3));p.drawEllipse(point,5,5);p.setPen(QPen(Qt::white,1.5));p.drawEllipse(point,5,5);
     }
-    void choose(QPointF point){const auto r=area();const auto chosen=QColor::fromHsvF(hue/359.,std::clamp((point.x()-r.left())/r.width(),0.,1.),std::clamp(1-(point.y()-r.top())/r.height(),0.,1.));if(changed)changed(chosen);}
+    void choose(QPointF point){const auto r=area();auto chosen=QColor::fromHsvF(hue/359.,std::clamp((point.x()-r.left())/r.width(),0.,1.),std::clamp(1-(point.y()-r.top())/r.height(),0.,1.));chosen.setAlpha(color.alpha());if(changed)changed(chosen);}
     void mousePressEvent(QMouseEvent* event) override {if(event->button()==Qt::LeftButton)choose(event->position());}
     void mouseMoveEvent(QMouseEvent* event) override {if(event->buttons()&Qt::LeftButton)choose(event->position());}
 };
-inline QColor chooseEditorColor(const QColor& initial,QWidget* parent,const QString& title="Chọn màu") {
+inline QColor chooseEditorColor(const QColor& initial,QWidget* parent,const QString& title="Chọn màu",bool allowAlpha=false) {
     AppDialog dialog(title,parent);dialog.setFixedWidth(408);
     auto* plane=new EditorColorPlane(&dialog);dialog.bodyLayout()->addWidget(plane);
     auto* hue=new QSlider(Qt::Horizontal,&dialog);hue->setRange(0,359);hue->setFixedHeight(22);
     hue->setStyleSheet("QSlider::groove:horizontal{height:10px;border-radius:5px;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 red,stop:0.17 yellow,stop:0.33 lime,stop:0.5 cyan,stop:0.67 blue,stop:0.83 magenta,stop:1 red);} QSlider::handle:horizontal{background:white;border:1px solid #aaa;width:12px;margin:-3px 0;border-radius:6px;}");
     dialog.bodyLayout()->addWidget(hue);
-    auto* row=new QHBoxLayout;auto* hex=new QLineEdit;hex->setObjectName("editorColorHex");hex->setMaxLength(7);hex->setFixedHeight(32);hex->setPlaceholderText("#FFFFFF");
+    auto* row=new QHBoxLayout;auto* hex=new QLineEdit;hex->setObjectName("editorColorHex");hex->setMaxLength(allowAlpha?9:7);hex->setFixedHeight(32);hex->setPlaceholderText(allowAlpha?"#RRGGBBAA":"#FFFFFF");
     auto* swatch=new QLabel;swatch->setFixedSize(32,32);row->addWidget(swatch);row->addWidget(hex,1);dialog.bodyLayout()->addLayout(row);
     auto* rgb=new QHBoxLayout;std::array<QSpinBox*,3> channel{};
     for(int i=0;i<3;++i){auto* column=new QVBoxLayout;column->setSpacing(6);column->addWidget(new QLabel(i==0?"R":i==1?"G":"B"));auto* spin=new QSpinBox;spin->setRange(0,255);spin->setButtonSymbols(QAbstractSpinBox::NoButtons);spin->setFixedHeight(32);column->addWidget(spin);channel[i]=spin;rgb->addLayout(column);}
     dialog.bodyLayout()->addLayout(rgb);
+    QSlider* alpha=nullptr;QLabel* alphaValue=nullptr;
+    if(allowAlpha) {
+        auto* alphaRow=new QHBoxLayout;alphaRow->addWidget(new QLabel("Độ mờ"));
+        alpha=new QSlider(Qt::Horizontal,&dialog);alpha->setRange(0,255);alpha->setFixedHeight(22);
+        alphaValue=new QLabel;alphaValue->setMinimumWidth(34);alphaValue->setAlignment(Qt::AlignRight|Qt::AlignVCenter);
+        alphaRow->addWidget(alpha,1);alphaRow->addWidget(alphaValue);dialog.bodyLayout()->addLayout(alphaRow);
+    }
     auto* palette=new QHBoxLayout;palette->setSpacing(6);
     QColor selected=initial.isValid()?initial:QColor(Qt::white);
     QDialogButtonBox* actions=nullptr;
     auto update=[&](QColor color){selected=color;plane->color=color;if(color.hsvHue()>=0)plane->hue=color.hsvHue();plane->update();
-        {QSignalBlocker guard(hue);hue->setValue(plane->hue);}{QSignalBlocker guard(hex);hex->setText(color.name().toUpper());}
+        {QSignalBlocker guard(hue);hue->setValue(plane->hue);}{QSignalBlocker guard(hex);hex->setText(editorColorToCss(color,allowAlpha));}
         for(int i=0;i<3;++i){QSignalBlocker guard(channel[i]);channel[i]->setValue(i==0?color.red():i==1?color.green():color.blue());}
+        if(alpha){QSignalBlocker guard(alpha);alpha->setValue(color.alpha());alphaValue->setText(QString::number(qRound(color.alphaF()*100))+QLatin1Char('%'));}
         swatch->setStyleSheet("border:1px solid #ccc;border-radius:7px;background:"+color.name()+";");if(actions)actions->button(QDialogButtonBox::Ok)->setEnabled(true);};
     for(const char* value:{"#ffffff","#000000","#ef4444","#f59e0b","#22c55e","#0ea5e9","#8b5cf6","#ec4899"}){auto* button=new QPushButton;button->setFixedSize(30,30);const QColor color(value);button->setStyleSheet("border:1px solid #ccc;border-radius:7px;padding:0;background:"+color.name()+";");QObject::connect(button,&QPushButton::clicked,&dialog,[&,color]{update(color);});palette->addWidget(button);}
     palette->addStretch();dialog.bodyLayout()->addLayout(palette);
     actions=new QDialogButtonBox(QDialogButtonBox::Cancel|QDialogButtonBox::Ok);actions->button(QDialogButtonBox::Cancel)->setText("Hủy");actions->button(QDialogButtonBox::Ok)->setText("Áp dụng");dialog.bodyLayout()->addWidget(actions);
     plane->changed=update;
-    QObject::connect(hue,&QSlider::valueChanged,&dialog,[&](int h){plane->hue=h;update(QColor::fromHsv(h,selected.hsvSaturation(),selected.value()));});
-    for(auto* spin:channel)QObject::connect(spin,&QSpinBox::valueChanged,&dialog,[&](int){update(QColor(channel[0]->value(),channel[1]->value(),channel[2]->value()));});
-    QObject::connect(hex,&QLineEdit::textEdited,&dialog,[&](const QString& text){QColor color(text.startsWith('#')?text:"#"+text);actions->button(QDialogButtonBox::Ok)->setEnabled(color.isValid());if(color.isValid())update(color);});
+    QObject::connect(hue,&QSlider::valueChanged,&dialog,[&](int h){plane->hue=h;auto color=QColor::fromHsv(h,selected.hsvSaturation(),selected.value());color.setAlpha(selected.alpha());update(color);});
+    for(auto* spin:channel)QObject::connect(spin,&QSpinBox::valueChanged,&dialog,[&](int){auto color=QColor(channel[0]->value(),channel[1]->value(),channel[2]->value());color.setAlpha(selected.alpha());update(color);});
+    if(alpha)QObject::connect(alpha,&QSlider::valueChanged,&dialog,[&](int value){auto color=selected;color.setAlpha(value);update(color);});
+    QObject::connect(hex,&QLineEdit::textEdited,&dialog,[&](const QString& text){QColor color=editorColorFromCss(text.startsWith('#')?text:"#"+text);actions->button(QDialogButtonBox::Ok)->setEnabled(color.isValid());if(color.isValid())update(color);});
     QObject::connect(actions,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);QObject::connect(actions,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);update(selected);
     return dialog.exec()==QDialog::Accepted?selected:QColor();
 }
+#if defined(__EMSCRIPTEN__)
+inline void chooseEditorColorAsync(const QColor& initial,QWidget* parent,const QString& title,
+                                   std::function<void(QColor)> accepted,bool allowAlpha=false) {
+    auto* dialog=new AppDialog(title,parent);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setFixedWidth(408);
+    auto* plane=new EditorColorPlane(dialog);dialog->bodyLayout()->addWidget(plane);
+    auto* hue=new QSlider(Qt::Horizontal,dialog);hue->setRange(0,359);dialog->bodyLayout()->addWidget(hue);
+    auto* row=new QHBoxLayout;
+    auto* swatch=new QLabel(dialog);swatch->setFixedSize(32,32);
+    auto* hex=new QLineEdit(dialog);hex->setObjectName("editorColorHex");hex->setMaxLength(allowAlpha?9:7);hex->setPlaceholderText(allowAlpha?"#RRGGBBAA":"#FFFFFF");
+    row->addWidget(swatch);row->addWidget(hex,1);dialog->bodyLayout()->addLayout(row);
+    auto* rgb=new QHBoxLayout;std::array<QSpinBox*,3> channel{};
+    for(int i=0;i<3;++i){auto* spin=new QSpinBox(dialog);spin->setRange(0,255);spin->setButtonSymbols(QAbstractSpinBox::NoButtons);channel[i]=spin;rgb->addWidget(spin);}
+    dialog->bodyLayout()->addLayout(rgb);
+    QSlider* alpha=nullptr;QLabel* alphaValue=nullptr;
+    if(allowAlpha) {
+        auto* alphaRow=new QHBoxLayout;alphaRow->addWidget(new QLabel("Độ mờ",dialog));
+        alpha=new QSlider(Qt::Horizontal,dialog);alpha->setRange(0,255);alpha->setFixedHeight(22);
+        alphaValue=new QLabel(dialog);alphaValue->setMinimumWidth(34);alphaValue->setAlignment(Qt::AlignRight|Qt::AlignVCenter);
+        alphaRow->addWidget(alpha,1);alphaRow->addWidget(alphaValue);dialog->bodyLayout()->addLayout(alphaRow);
+    }
+    auto* palette=new QHBoxLayout;
+    auto* actions=new QDialogButtonBox(QDialogButtonBox::Cancel|QDialogButtonBox::Ok,dialog);
+    actions->button(QDialogButtonBox::Cancel)->setText("Hủy");actions->button(QDialogButtonBox::Ok)->setText("Áp dụng");
+    auto selected=std::make_shared<QColor>(initial.isValid()?initial:QColor(Qt::white));
+    std::function<void(QColor)> update=[=](QColor color){
+        *selected=color;plane->color=color;if(color.hsvHue()>=0)plane->hue=color.hsvHue();plane->update();
+        {QSignalBlocker guard(hue);hue->setValue(plane->hue);}
+        {QSignalBlocker guard(hex);hex->setText(editorColorToCss(color,allowAlpha));}
+        for(int i=0;i<3;++i){QSignalBlocker guard(channel[i]);channel[i]->setValue(i==0?color.red():i==1?color.green():color.blue());}
+        if(alpha){QSignalBlocker guard(alpha);alpha->setValue(color.alpha());alphaValue->setText(QString::number(qRound(color.alphaF()*100))+QLatin1Char('%'));}
+        swatch->setStyleSheet("border:1px solid #ccc;border-radius:7px;background:"+color.name());
+        actions->button(QDialogButtonBox::Ok)->setEnabled(color.isValid());
+    };
+    for(const char* value:{"#ffffff","#000000","#ef4444","#f59e0b","#22c55e","#0ea5e9","#8b5cf6","#ec4899"}){
+        auto* button=new QPushButton(dialog);button->setFixedSize(30,30);const QColor color(value);
+        button->setStyleSheet("border:1px solid #ccc;border-radius:7px;padding:0;background:"+color.name());
+        QObject::connect(button,&QPushButton::clicked,dialog,[update,color]{update(color);});palette->addWidget(button);
+    }
+    palette->addStretch();dialog->bodyLayout()->addLayout(palette);dialog->bodyLayout()->addWidget(actions);
+    plane->changed=update;
+    QObject::connect(hue,&QSlider::valueChanged,dialog,[=](int h){plane->hue=h;auto color=QColor::fromHsv(h,selected->hsvSaturation(),selected->value());color.setAlpha(selected->alpha());update(color);});
+    for(auto* spin:channel)QObject::connect(spin,&QSpinBox::valueChanged,dialog,[=](int){auto color=QColor(channel[0]->value(),channel[1]->value(),channel[2]->value());color.setAlpha(selected->alpha());update(color);});
+    if(alpha)QObject::connect(alpha,&QSlider::valueChanged,dialog,[=](int value){auto color=*selected;color.setAlpha(value);update(color);});
+    QObject::connect(hex,&QLineEdit::textEdited,dialog,[=](const QString& text){QColor color=editorColorFromCss(text.startsWith('#')?text:"#"+text);actions->button(QDialogButtonBox::Ok)->setEnabled(color.isValid());if(color.isValid())update(color);});
+    QObject::connect(actions,&QDialogButtonBox::accepted,dialog,&QDialog::accept);
+    QObject::connect(actions,&QDialogButtonBox::rejected,dialog,&QDialog::reject);
+    QObject::connect(dialog,&QDialog::accepted,parent,[selected,accepted=std::move(accepted)]{accepted(*selected);});
+    update(*selected);dialog->open();
+}
+#endif
 }

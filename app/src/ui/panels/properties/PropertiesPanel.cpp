@@ -187,12 +187,29 @@ void PropertiesPanel::setupUi() {
         readers_.push_back([combo,key=std::string(key),def](const editor::Clip& clip){QSignalBlocker guard(combo); combo->setCurrentIndex(combo->findData(QString::fromStdString(clip.getParam<std::string>(key,def.toStdString()))));});
         connect(combo,&QComboBox::currentIndexChanged,this,[this,combo,key=std::string(key)](int i){if(i>=0)patch({{key,combo->currentData().toString().toStdString()}});});
     };
-    auto color=[&](QVBoxLayout* layout,const QString& label,const char* key,const char* def) -> QPushButton* {
+    auto color=[&](QVBoxLayout* layout,const QString& label,const char* key,const char* def,bool allowAlpha=false) -> QPushButton* {
         auto* button=new QPushButton; button->setObjectName(QString("property_")+key); button->setFixedHeight(30); button->setStyleSheet(QString("text-align:left;background:%1;border-radius:9px;padding:0 8px;").arg(pal.hover.name()));
         button->setProperty("colorField",true);
         field(layout,label,button);
-        readers_.push_back([button,key=std::string(key),def=std::string(def)](const editor::Clip& clip) { QColor c(QString::fromStdString(clip.getParam<std::string>(key,def))); QPixmap swatch(16,16); swatch.fill(c);button->setIcon(QIcon(swatch)); button->setText(c.name().mid(1).toUpper()); button->setProperty("color",c); });
-        connect(button,&QPushButton::clicked,this,[this,button,key=std::string(key)] {auto c=chooseEditorColor(button->property("color").value<QColor>(),this); if(c.isValid())patch({{key,c.name().toStdString()}});});
+        readers_.push_back([this,button,key=std::string(key),def=std::string(def)](const editor::Clip& clip) {
+            std::string value=clip.getParam<std::string>(key,def);
+            if(key.rfind("effect.",0)==0) {
+                if(const auto* effect=selectedEffect(clip,selectedEffectId_)) {
+                    const auto it=effect->params.find(key.substr(7));
+                    if(it!=effect->params.end()&&it->is_string())value=it->get<std::string>();
+                }
+            }
+            QColor c=editorColorFromCss(QString::fromStdString(value)); QPixmap swatch(16,16); swatch.fill(c);button->setIcon(QIcon(swatch)); button->setText(editorColorToCss(c,true).mid(1)); button->setProperty("color",c);
+        });
+        connect(button,&QPushButton::clicked,this,[this,button,key=std::string(key),allowAlpha] {
+#if defined(__EMSCRIPTEN__)
+            chooseEditorColorAsync(button->property("color").value<QColor>(),this,"Chọn màu",
+                [this,key,allowAlpha](QColor c){if(c.isValid())patch({{key,editorColorToCss(c,allowAlpha).toLower().toStdString()}});},allowAlpha);
+#else
+            auto c=chooseEditorColor(button->property("color").value<QColor>(),this,"Chọn màu",allowAlpha);
+            if(c.isValid())patch({{key,editorColorToCss(c,allowAlpha).toLower().toStdString()}});
+#endif
+        });
         return button;
     };
     auto* text=addTab("text","Văn bản",UiIcon::Font);
@@ -206,13 +223,37 @@ void PropertiesPanel::setupUi() {
     readers_.push_back([family](const editor::Clip& c){if(!family->hasFocus())family->setText(QString::fromStdString(c.getParam<std::string>("text.fontFamily","Arial")));});
     connect(family,&QLineEdit::editingFinished,this,[this,family]{if(!family->text().trimmed().isEmpty())patch({{"text.fontFamily",family->text().trimmed().toStdString()}});});
     number(text,"Cỡ chữ","text.fontSize",15,1,500,1);
-    color(text,"Màu","text.color","#FFFFFF");
+    color(text,"Màu","text.color","#FFFFFF",true);
     select(text,"Căn chỉnh văn bản","text.textAlign",{"Trái","Giữa","Phải"},{"left","center","right"},"center");
     select(text,"Độ đậm","text.fontWeight",{"Bình thường","Đậm"},{"normal","bold"},"normal");
     select(text,"Kiểu chữ","text.fontStyle",{"Bình thường","Nghiêng"},{"normal","italic"},"normal");
     select(text,"Trang trí","text.textDecoration",{"Không","Gạch chân","Gạch ngang"},{"none","underline","line-through"},"none");
     number(text,"Khoảng cách chữ","text.letterSpacing",0,-100,1000,.1,1.,true);
     number(text,"Chiều cao dòng","text.lineHeight",1.2,.1,10,.1,1.,true);
+    auto* textBackgroundEnabled=new ToggleSwitch(content);
+    textBackgroundEnabled->setObjectName("property_background.enabled");
+    field(text,"Bật nền",textBackgroundEnabled);
+    auto* textBackgroundColor=color(text,"Màu nền","background.color","#000000",true);
+    auto* textBackgroundRadius=number(text,"Bo góc nền","background.cornerRadius",0,0,100,1,1.,true);
+    auto* textBackgroundPaddingX=number(text,"Đệm nền X","background.paddingX",30,0,100000,1,1.,true);
+    auto* textBackgroundPaddingY=number(text,"Đệm nền Y","background.paddingY",42,0,100000,1,1.,true);
+    auto* textBackgroundOffsetX=number(text,"Dịch nền X","background.offsetX",0,-100000,100000,1,1.,true);
+    auto* textBackgroundOffsetY=number(text,"Dịch nền Y","background.offsetY",0,-100000,100000,1,1.,true);
+    const auto textBackgroundRows=std::vector<QWidget*>{
+        textBackgroundColor->parentWidget(),textBackgroundRadius->parentWidget(),
+        textBackgroundPaddingX->parentWidget(),textBackgroundPaddingY->parentWidget(),
+        textBackgroundOffsetX->parentWidget(),textBackgroundOffsetY->parentWidget()};
+    for(auto* row:textBackgroundRows)row->hide();
+    connect(textBackgroundEnabled,&QCheckBox::toggled,this,[this,textBackgroundRows](bool enabled){
+        for(auto* row:textBackgroundRows)row->setVisible(enabled);
+        patch({{"background.enabled",enabled}});
+    });
+    readers_.push_back([textBackgroundEnabled,textBackgroundRows](const editor::Clip& clip){
+        const bool enabled=clip.getParam<bool>("background.enabled",false);
+        QSignalBlocker guard(textBackgroundEnabled);
+        textBackgroundEnabled->setChecked(enabled);
+        for(auto* row:textBackgroundRows)row->setVisible(enabled);
+    });
     auto* tts=addTab("tts","Chuyển văn bản thành giọng nói",UiIcon::Audio);
     auto* ttsInfo=new QLabel("Chưa kết nối bộ tổng hợp giọng nói. Không tạo âm thanh giả thay lời đọc."); ttsInfo->setWordWrap(true);tts->addWidget(ttsInfo);
     auto* transform=addTab("transform","Biến đổi",UiIcon::Transform);

@@ -1,9 +1,12 @@
 #include "RenderEngine.h"
 #include "editor/retime/RetimeEngine.h"
-#include "render/effects/ClipEffectRenderer.h"
-#include "render/RenderParamResolvers.h"
 #include "media/decoder/NativeVideoDecoder.h"
 #include "media/MediaLibrary.h"
+#include "render/effects/EffectDefinitionRegistry.h"
+#include "render/effects/ClipEffectRenderer.h"
+#include "render/MaskEngine.h"
+#include "render/RenderParamResolvers.h"
+#include "render/text/TextRenderingPrimitives.h"
 #include <algorithm>
 #include <cmath>
 
@@ -21,6 +24,18 @@
 #endif
 
 namespace catchim::render {
+
+#if defined(HAVE_QT6)
+static QColor colorFromCss(const std::string& value) {
+    QString css = QString::fromStdString(value);
+    if (css.size() == 9 && css.startsWith(QLatin1Char('#'))) {
+        // Web colors store alpha last (#RRGGBBAA); QColor's 8-digit form is
+        // alpha first (#AARRGGBB).
+        css = QStringLiteral("#") + css.mid(7, 2) + css.mid(1, 6);
+    }
+    return QColor(css);
+}
+#endif
 
 RenderEngine::RenderEngine(int32_t width, int32_t height)
     : compositor_(width, height)
@@ -297,6 +312,41 @@ const CompositorOutput& RenderEngine::renderFrame(
 
                 QColor textColor(QString::fromStdString(colorStr));
                 if (!textColor.isValid()) textColor = Qt::white;
+                const QString displayText = QString::fromStdString(textContent);
+
+                const auto resolveBackgroundNumber = [&clip, localTime](const char* key, double fallback) {
+                    if (const auto* channel = clip.findAnimationChannel(key); channel && !channel->empty())
+                        return channel->getValueAt(localTime);
+                    return clip.getParam<double>(key, fallback);
+                };
+                const auto paintTextBackground = [&](const QRectF& textBounds) {
+                    if (!clip.getParam<bool>("background.enabled", false) || textBounds.isEmpty()) return;
+                    const auto backgroundString = clip.getParam<std::string>("background.color", "#000000");
+                    if (backgroundString.empty() || backgroundString == "transparent") return;
+                    QColor backgroundColor = colorFromCss(backgroundString);
+                    if (!backgroundColor.isValid() || backgroundColor.alpha() == 0) return;
+
+                    const double fontSizeRatio = std::max(0.0, fontSize / 15.0);
+                    const double paddingX = std::max(0.0,
+                        resolveBackgroundNumber("background.paddingX", 30.0) * fontSizeRatio * outputScaleX);
+                    const double paddingY = std::max(0.0,
+                        resolveBackgroundNumber("background.paddingY", 42.0) * fontSizeRatio * outputScaleY);
+                    const double offsetX = resolveBackgroundNumber("background.offsetX", 0.0) * outputScaleX;
+                    const double offsetY = resolveBackgroundNumber("background.offsetY", 0.0) * outputScaleY;
+                    const QRectF backgroundRect = textBounds.adjusted(
+                        -paddingX + offsetX, -paddingY + offsetY,
+                        paddingX + offsetX, paddingY + offsetY);
+                    const double cornerRadius = std::clamp(
+                        resolveBackgroundNumber("background.cornerRadius", 0.0), 0.0, 100.0);
+                    const double radius = TextRenderingPrimitives::calculateCornerRadiusPx(
+                        backgroundRect.width(), backgroundRect.height(), cornerRadius);
+
+                    painter.save();
+                    painter.setPen(Qt::NoPen);
+                    painter.setBrush(backgroundColor);
+                    painter.drawRoundedRect(backgroundRect, radius, radius);
+                    painter.restore();
+                };
 
                 QRect rect(40, 0, layer.sourceWidth - 80, layer.sourceHeight);
                 int flags = Qt::AlignHCenter | Qt::AlignVCenter | Qt::TextWordWrap;
@@ -314,7 +364,6 @@ const CompositorOutput& RenderEngine::renderFrame(
                 flags &= ~(Qt::AlignLeft | Qt::AlignRight | Qt::AlignHCenter);
                 flags |= align=="left"?Qt::AlignLeft:align=="right"?Qt::AlignRight:Qt::AlignHCenter;
                 if(customTextLayout) {
-                    const QString displayText=QString::fromStdString(textContent);
                     QTextOption textOption;
                     textOption.setAlignment(Qt::Alignment(flags)&(Qt::AlignLeft|Qt::AlignHCenter|Qt::AlignRight));
                     textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
@@ -339,6 +388,17 @@ const CompositorOutput& RenderEngine::renderFrame(
                     if(flags&Qt::AlignBottom)top+=rect.height()-blockHeight;
                     else if(flags&Qt::AlignVCenter)top+=(rect.height()-blockHeight)/2.0;
 
+                    QRectF textBounds;
+                    bool hasTextBounds = false;
+                    for (int lineIndex = 0; lineIndex < lineCount; ++lineIndex) {
+                        const QRectF lineBounds = textLayout.lineAt(lineIndex).naturalTextRect()
+                            .translated(rect.left(), top);
+                        if (lineBounds.isEmpty()) continue;
+                        textBounds = hasTextBounds ? textBounds.united(lineBounds) : lineBounds;
+                        hasTextBounds = true;
+                    }
+                    if (hasTextBounds) paintTextBackground(textBounds);
+
                     painter.save();
                     painter.setClipRect(rect);
                     painter.setPen(QColor(0,0,0,220));
@@ -347,10 +407,12 @@ const CompositorOutput& RenderEngine::renderFrame(
                     textLayout.draw(&painter,QPointF(rect.left(),top));
                     painter.restore();
                 } else {
+                    const QRectF textBounds = painter.boundingRect(rect, flags, displayText);
+                    paintTextBackground(textBounds);
                     painter.setPen(QColor(0, 0, 0, 220));
-                    painter.drawText(rect.translated(2, 2), flags, QString::fromStdString(textContent));
+                    painter.drawText(rect.translated(2, 2), flags, displayText);
                     painter.setPen(textColor);
-                    painter.drawText(rect, flags, QString::fromStdString(textContent));
+                    painter.drawText(rect, flags, displayText);
                 }
             }
 #endif

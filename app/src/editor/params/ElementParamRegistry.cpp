@@ -65,8 +65,10 @@ std::vector<ElementParamDefinition> ElementParamRegistry::getBuiltInElementParam
         params.push_back({"background.enabled",     "Enable Background","boolean", false,     std::nullopt, std::nullopt, std::nullopt});
         params.push_back({"background.color",       "Background Color", "color",   "#000000", std::nullopt, std::nullopt, std::nullopt});
         params.push_back({"background.cornerRadius","Corner Radius",    "number",  0.0,       0.0, 100.0, 1.0});
-        params.push_back({"background.paddingX",    "Padding X",        "number",  20.0,      0.0, 200.0, 1.0});
-        params.push_back({"background.paddingY",    "Padding Y",        "number",  10.0,      0.0, 200.0, 1.0});
+        params.push_back({"background.paddingX",    "Padding X",        "number",  30.0,      0.0, std::nullopt, 1.0});
+        params.push_back({"background.paddingY",    "Padding Y",        "number",  42.0,      0.0, std::nullopt, 1.0});
+        params.push_back({"background.offsetX",     "Offset X",         "number",  0.0,       -100000.0, std::nullopt, 1.0});
+        params.push_back({"background.offsetY",     "Offset Y",         "number",  0.0,       -100000.0, std::nullopt, 1.0});
     }
 
     return params;
