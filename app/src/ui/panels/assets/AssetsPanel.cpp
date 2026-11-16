@@ -422,6 +422,12 @@ void AssetsPanel::setupUi() {
         const QMargins margins = page->contentsMargins();
         // Keep one shared horizontal inset for all tabs in the asset panel.
         page->setContentsMargins(0, margins.top(), 0, margins.bottom());
+        // A reserved vertical-scrollbar gutter makes scrollable tabs narrower
+        // only on the right. Keep the shared inset symmetric and let the user
+        // scroll these panels with the wheel or trackpad instead.
+        for (auto* scrollArea : page->findChildren<QAbstractScrollArea*>()) {
+            scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        }
         viewsStack_->addWidget(page);
     };
     // Scroll-area gutters are balanced separately inside each page.
