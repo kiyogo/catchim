@@ -1,4 +1,7 @@
 #include "ExportDialog.h"
+#include "export/ExportCanvasGeometryResolver.h"
+#include "export/ExportGeometryResolver.h"
+#include "editor/project/ProjectDiagnostics.h"
 #include "ui/widgets/EditorLanguage.h"
 
 #if defined(HAVE_QT6)
@@ -14,15 +17,34 @@
 #include <QHBoxLayout>
 #include <QFormLayout>
 #include <QFileDialog>
+#include <QMessageBox>
+#include <QInputDialog>
+#include <QSettings>
+#include <QLineEdit>
 #include <QApplication>
 #include <QTimer>
 #include <QFile>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 #if !defined(__EMSCRIPTEN__)
 #include <QProcess>
 #endif
+#include <algorithm>
 #include <cmath>
 
 namespace catchim::ui {
+
+#if defined(__EMSCRIPTEN__)
+static QString browserExportBackendDescription() {
+    const bool gpuCompositor = EM_ASM_INT({ return Module.catchimExportGpuEnabled ? 1 : 0; }) != 0;
+    const int encoderEfficiency = EM_ASM_INT({ return Module.catchimExportEncoderPowerEfficient === true ? 1 : Module.catchimExportEncoderPowerEfficient === false ? 0 : -1; });
+    if (!gpuCompositor) return "CPU ghép hình + WebCodecs (GPU chưa hoạt động)";
+    if (encoderEfficiency == 1) return "WebGPU ghép hình + WebCodecs (trình duyệt báo encoder hiệu quả)";
+    if (encoderEfficiency == 0) return "WebGPU ghép hình + WebCodecs (GPU encoder chưa được xác nhận)";
+    return "WebGPU ghép hình + WebCodecs (chưa xác định encoder GPU)";
+}
+#endif
 
 ExportDialog::ExportDialog(
     editor::EditorEngine& engine,
@@ -128,12 +150,75 @@ void ExportDialog::setupUi() {
         combo->setStyleSheet("QComboBox{background:transparent;border:none;min-height:0;padding:0;}");
         l->addWidget(combo); settingsLayout->addWidget(row);
     };
+    presetCombo_ = new WebComboBox(settingsWidget_); presetCombo_->setObjectName("exportPreset");
+    presetCombo_->addItem("Tùy chỉnh", "custom");
+    presetCombo_->addItem("YouTube / Full HD", "youtube");
+    presetCombo_->addItem("Shorts / Reels", "shorts");
+    presetCombo_->addItem("Xem trước nhanh", "draft");
+    presetCombo_->addItem("Tệp nhỏ", "small");
+    connect(presetCombo_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        const auto preset = presetCombo_->itemData(index).toString();
+        if (preset == "custom") return;
+        if (preset.startsWith("user:")) {
+            const auto values = presetCombo_->itemData(index, Qt::UserRole + 1).toMap();
+            resolutionCombo_->setCurrentIndex(resolutionCombo_->findData(values.value("resolution")));
+            int aspectIndex = aspectRatioCombo_->findData(values.value("aspectRatio", "source"));
+            if (aspectIndex < 0) aspectIndex = aspectRatioCombo_->findData("source");
+            aspectRatioCombo_->setCurrentIndex(aspectIndex);
+            const auto savedFrameRate = values.value("frameRate", "source");
+            int frameRateIndex = frameRateCombo_->findData(savedFrameRate);
+            if (frameRateIndex < 0) frameRateIndex = frameRateCombo_->findData("source");
+            frameRateCombo_->setCurrentIndex(frameRateIndex);
+            formatCombo_->setCurrentIndex(formatCombo_->findData(values.value("format")));
+            qualityCombo_->setCurrentIndex(qualityCombo_->findData(values.value("quality")));
+            const auto savedBitrate = values.value("videoBitrate", "auto");
+            int bitrateIndex = videoBitrateCombo_->findData(savedBitrate);
+            if (bitrateIndex < 0) bitrateIndex = videoBitrateCombo_->findData("auto");
+            videoBitrateCombo_->setCurrentIndex(bitrateIndex);
+            audioCombo_->setCurrentIndex(audioCombo_->findData(values.value("audio")));
+            return;
+        }
+        const bool draft = preset == "draft" || preset == "small";
+        resolutionCombo_->setCurrentIndex(resolutionCombo_->findData(draft ? "720p" : "1080p"));
+        const QString aspect = preset == "shorts" ? "9:16" : preset == "small" ? "source" : "16:9";
+        aspectRatioCombo_->setCurrentIndex(aspectRatioCombo_->findData(aspect));
+        frameRateCombo_->setCurrentIndex(frameRateCombo_->findData(
+            preset == "small" ? QVariant("source") : QVariant(30.0)));
+        formatCombo_->setCurrentIndex(formatCombo_->findData(preset == "small" ? "webm" : "mp4"));
+        qualityCombo_->setCurrentIndex(qualityCombo_->findData(preset == "draft" ? "medium" : "high"));
+        videoBitrateCombo_->setCurrentIndex(videoBitrateCombo_->findData("auto"));
+        audioCombo_->setCurrentIndex(audioCombo_->findData("include"));
+    });
+    addRow("Preset xuất", presetCombo_);
     resolutionCombo_ = new WebComboBox(settingsWidget_); resolutionCombo_->setObjectName("exportResolution");
     for (const auto& pair : {qMakePair("Nguồn gốc","source"),qMakePair("480p","480p"),qMakePair("720p","720p"),qMakePair("1080p","1080p"),qMakePair("1440p","1440p"),qMakePair("4K (2160p)","2160p"),qMakePair("8K (4320p)","4320p")})
         resolutionCombo_->addItem(QString::fromUtf8(pair.first),pair.second);
     resolutionCombo_->setCurrentIndex(0);
     connect(resolutionCombo_,&QComboBox::currentIndexChanged,this,&ExportDialog::onResolutionChanged);
     addRow("Độ phân giải",resolutionCombo_);
+    aspectRatioCombo_ = new WebComboBox(settingsWidget_); aspectRatioCombo_->setObjectName("exportAspectRatio");
+    aspectRatioCombo_->addItem("Nguồn gốc", "source");
+    aspectRatioCombo_->addItem("16:9 - Ngang", "16:9");
+    aspectRatioCombo_->addItem("9:16 - Dọc", "9:16");
+    aspectRatioCombo_->addItem("1:1 - Vuông", "1:1");
+    aspectRatioCombo_->addItem("4:5 - Dọc mạng xã hội", "4:5");
+    aspectRatioCombo_->addItem("4:3 - Cổ điển", "4:3");
+    aspectRatioCombo_->addItem("21:9 - Điện ảnh", "21:9");
+    connect(aspectRatioCombo_, &QComboBox::currentIndexChanged, this, [this] { updateInfoLabel(); });
+    addRow("Tỷ lệ khung hình",aspectRatioCombo_);
+    frameRateCombo_ = new WebComboBox(settingsWidget_); frameRateCombo_->setObjectName("exportFrameRate");
+    const auto& projectFps = engine_.project().settings().fps;
+    const double sourceFps = projectFps.denominator > 0
+        ? static_cast<double>(projectFps.numerator) / projectFps.denominator : 30.0;
+    const QString sourceFpsLabel = QString::number(sourceFps, 'f', std::abs(sourceFps - std::round(sourceFps)) < 0.001 ? 0 : 3);
+    frameRateCombo_->addItem(QString("Nguồn gốc (%1 fps)").arg(sourceFpsLabel), "source");
+    for (const auto& pair : {qMakePair("23.976 fps", 23.976), qMakePair("24 fps", 24.0),
+             qMakePair("25 fps", 25.0), qMakePair("29.97 fps", 29.97), qMakePair("30 fps", 30.0),
+             qMakePair("50 fps", 50.0), qMakePair("59.94 fps", 59.94), qMakePair("60 fps", 60.0),
+             qMakePair("120 fps", 120.0)})
+        frameRateCombo_->addItem(pair.first, pair.second);
+    connect(frameRateCombo_, &QComboBox::currentIndexChanged, this, [this] { updateInfoLabel(); });
+    addRow("Tốc độ khung hình", frameRateCombo_);
     formatCombo_ = new WebComboBox(settingsWidget_); formatCombo_->setObjectName("exportFormat");
     formatCombo_->addItem("MP4 (H.264) - Tương thích tốt hơn","mp4");
     formatCombo_->addItem("WebM (VP9) - Dung lượng nhỏ hơn","webm");
@@ -142,10 +227,57 @@ void ExportDialog::setupUi() {
     qualityCombo_ = new WebComboBox(settingsWidget_); qualityCombo_->setObjectName("exportQuality");
     qualityCombo_->addItem("Cao - Khuyên dùng","high"); qualityCombo_->addItem("Trung bình - Cân bằng","medium");
     qualityCombo_->addItem("Rất cao - Dung lượng lớn nhất","very_high"); qualityCombo_->addItem("Thấp - Dung lượng nhỏ nhất","low");
+    connect(qualityCombo_, &QComboBox::currentIndexChanged, this, [this] { updateInfoLabel(); });
     addRow("Chất lượng",qualityCombo_);
+    videoBitrateCombo_ = new WebComboBox(settingsWidget_); videoBitrateCombo_->setObjectName("exportBitrate");
+    videoBitrateCombo_->setToolTip("Tự động dùng mức chất lượng đã chọn, hoặc đặt bitrate mục tiêu cho video.");
+    videoBitrateCombo_->addItem("Tự động theo chất lượng", "auto");
+    for (const auto& pair : {qMakePair("1 Mbps", 1'000'000LL), qMakePair("2 Mbps", 2'000'000LL),
+             qMakePair("5 Mbps", 5'000'000LL), qMakePair("8 Mbps", 8'000'000LL),
+             qMakePair("12 Mbps", 12'000'000LL), qMakePair("20 Mbps", 20'000'000LL),
+             qMakePair("35 Mbps", 35'000'000LL), qMakePair("60 Mbps", 60'000'000LL)})
+        videoBitrateCombo_->addItem(pair.first, QVariant::fromValue<qlonglong>(pair.second));
+    connect(videoBitrateCombo_, &QComboBox::currentIndexChanged, this, [this] {
+        const bool automatic = getTargetVideoBitrate() == 0;
+        qualityCombo_->setEnabled(automatic);
+        updateInfoLabel();
+    });
+    addRow("Bitrate video", videoBitrateCombo_);
     audioCombo_ = new WebComboBox(settingsWidget_); audioCombo_->setObjectName("exportAudio");
     audioCombo_->addItem("Bao gồm âm thanh","include"); audioCombo_->addItem("Không có âm thanh","mute");
     addRow("Âm thanh",audioCombo_);
+    const auto savedPresets = QSettings().value("export/customPresets").toList();
+    for (const auto& entry : savedPresets) {
+        const auto values = entry.toMap();
+        const auto name = values.value("name").toString();
+        if (name.isEmpty()) continue;
+        presetCombo_->addItem(name, "user:" + name);
+        presetCombo_->setItemData(presetCombo_->count() - 1, values, Qt::UserRole + 1);
+    }
+    auto* savePreset = new QPushButton("Lưu cấu hình hiện tại thành preset", settingsWidget_);
+    savePreset->setFixedHeight(30);
+    connect(savePreset, &QPushButton::clicked, this, [this] {
+        bool accepted = false;
+        const auto name = QInputDialog::getText(this, "Lưu preset xuất", "Tên preset:", QLineEdit::Normal, {}, &accepted).trimmed();
+        if (!accepted || name.isEmpty()) return;
+        QVariantMap values{{"name", name}, {"resolution", resolutionCombo_->currentData()},
+            {"aspectRatio", aspectRatioCombo_->currentData()},
+            {"frameRate", frameRateCombo_->currentData()},
+            {"format", formatCombo_->currentData()}, {"quality", qualityCombo_->currentData()},
+            {"videoBitrate", videoBitrateCombo_->currentData()},
+            {"audio", audioCombo_->currentData()}};
+        auto presets = QSettings().value("export/customPresets").toList();
+        presets.erase(std::remove_if(presets.begin(), presets.end(), [&name](const QVariant& preset) {
+            return preset.toMap().value("name").toString().compare(name, Qt::CaseInsensitive) == 0;
+        }), presets.end());
+        presets.push_back(values);
+        QSettings().setValue("export/customPresets", presets);
+        int index = presetCombo_->findData("user:" + name);
+        if (index < 0) { presetCombo_->addItem(name, "user:" + name); index = presetCombo_->count() - 1; }
+        presetCombo_->setItemData(index, values, Qt::UserRole + 1);
+        presetCombo_->setCurrentIndex(index);
+    });
+    settingsLayout->addWidget(savePreset);
     mainLayout->addWidget(settingsWidget_);
 
     infoLabel_ = new QLabel(card); infoLabel_->setObjectName("exportOutputSize");
@@ -165,9 +297,13 @@ void ExportDialog::setupUi() {
     progressWidget_ = new QWidget(card);
     auto* progressLayout = new QVBoxLayout(progressWidget_); progressLayout->setContentsMargins(12,8,12,8); progressLayout->setSpacing(8);
     progressStatusLabel_ = new QLabel("Đang chuẩn bị xuất…",progressWidget_); progressStatusLabel_->setWordWrap(true);
-    progressBar_ = new QProgressBar(progressWidget_); progressBar_->setRange(0,100); progressBar_->setValue(0); progressBar_->setFixedHeight(16);
-    progressBar_->setTextVisible(false);progressBar_->setFixedHeight(6);
-    progressBar_->setStyleSheet(QString("QProgressBar{background:%1;border:none;border-radius:3px;} QProgressBar::chunk{background:%2;border-radius:3px;}").arg(pal.secondary.name(),pal.primaryAccent.name()));
+    progressBar_ = new QProgressBar(progressWidget_); progressBar_->setObjectName("exportProgressBar"); progressBar_->setRange(0,100); progressBar_->setValue(0); progressBar_->setFixedHeight(8);
+    progressBar_->setTextVisible(false);
+    progressBar_->setInvertedAppearance(false);
+    progressBar_->setStyleSheet(QString(
+        "QProgressBar#exportProgressBar{background-color:%1;border:1px solid %2;border-radius:4px;padding:0px;text-align:left;}"
+        "QProgressBar#exportProgressBar::chunk{background-color:%3;border:none;border-radius:3px;min-width:2px;}"
+    ).arg(pal.secondary.name(),pal.border.name(),pal.primaryAccent.name()));
     telemetryFpsLabel_ = new QLabel(progressWidget_); telemetryFpsLabel_->setWordWrap(true);
     toggleLogBtn_ = new QPushButton("Xem nhật ký kỹ thuật",progressWidget_);
     connect(toggleLogBtn_,&QPushButton::clicked,this,&ExportDialog::onToggleTechLog);
@@ -199,23 +335,69 @@ QSize ExportDialog::getTargetResolution() const {
         srcH = 1080;
     }
 
-    if (resCode == "source") return QSize(std::max(2,qRound(srcW/2.)*2),std::max(2,qRound(srcH/2.)*2));
-    bool ok=false; const int targetHeight=resCode.chopped(1).toInt(&ok);
-    if (!ok || targetHeight<=0) return QSize(srcW,srcH);
-    const int targetWidth=std::max(2,qRound((double(targetHeight)*srcW/srcH)/2.0)*2);
-    return QSize(targetWidth,targetHeight);
+    bool ok=false;
+    const int targetHeight = resCode == "source" ? srcH : resCode.chopped(1).toInt(&ok);
+    if (resCode != "source" && (!ok || targetHeight <= 0)) return QSize(srcW,srcH);
+    const auto resolved = exporting::ExportCanvasGeometryResolver::resolveExportCanvasSize(
+        editor::CanvasSize{srcW,srcH}, targetHeight, getTargetAspectRatio());
+    return QSize(resolved.width,resolved.height);
+}
+
+double ExportDialog::getTargetAspectRatio() const {
+    if (!aspectRatioCombo_ || aspectRatioCombo_->currentData().toString() == "source") {
+        const auto& canvas = engine_.project().settings().canvasSize;
+        if (canvas.width > 0 && canvas.height > 0)
+            return static_cast<double>(canvas.width) / canvas.height;
+        return 16.0 / 9.0;
+    }
+    const QStringList parts = aspectRatioCombo_->currentData().toString().split(':');
+    if (parts.size() != 2) return 16.0 / 9.0;
+    bool widthOk = false, heightOk = false;
+    const double ratioWidth = parts[0].toDouble(&widthOk);
+    const double ratioHeight = parts[1].toDouble(&heightOk);
+    return widthOk && heightOk && ratioWidth > 0.0 && ratioHeight > 0.0
+        ? ratioWidth / ratioHeight : 16.0 / 9.0;
 }
 
 void ExportDialog::updateInfoLabel() {
     if (!infoLabel_) return;
     QSize sz = getTargetResolution();
-    const auto& fpsSetting = engine_.project().settings().fps;
-    double fps = (fpsSetting.denominator > 0) ?
-        static_cast<double>(fpsSetting.numerator) / fpsSetting.denominator : 30.0;
-    if (fps <= 0.0) fps = 30.0;
+    const double fps = getTargetFrameRate();
 
-    infoLabel_->setText(QString("Kích thước xuất: %1 x %2").arg(sz.width()).arg(sz.height()));
-    infoLabel_->setToolTip(QString("Tốc độ khung hình: %1 fps").arg(fps,0,'f',0));
+    const QString aspect = aspectRatioCombo_ && aspectRatioCombo_->currentData().toString() != "source"
+        ? aspectRatioCombo_->currentData().toString() : QString("Gốc");
+    const QString bitrate = getTargetVideoBitrateLabel();
+    infoLabel_->setText(QString("Kích thước xuất: %1 x %2 • %3 • %4 fps • %5")
+        .arg(sz.width()).arg(sz.height()).arg(aspect)
+        .arg(fps, 0, 'f', std::abs(fps - std::round(fps)) < 0.001 ? 0 : 3).arg(bitrate));
+    infoLabel_->setToolTip(QString("Tỷ lệ khung hình %1; tốc độ %2 fps; bitrate %3")
+        .arg(aspect).arg(fps,0,'f',3).arg(bitrate));
+}
+
+double ExportDialog::getTargetFrameRate() const {
+    if (!frameRateCombo_ || frameRateCombo_->currentData().toString() == "source") {
+        const auto& source = engine_.project().settings().fps;
+        const double fps = source.denominator > 0
+            ? static_cast<double>(source.numerator) / source.denominator : 30.0;
+        return std::isfinite(fps) && fps > 0.0 ? fps : 30.0;
+    }
+    bool ok = false;
+    const double fps = frameRateCombo_->currentData().toDouble(&ok);
+    return ok && std::isfinite(fps) && fps > 0.0 ? fps : 30.0;
+}
+
+qint64 ExportDialog::getTargetVideoBitrate() const {
+    if (!videoBitrateCombo_ || videoBitrateCombo_->currentData().toString() == "auto") return 0;
+    bool ok = false;
+    const qint64 bitrate = videoBitrateCombo_->currentData().toLongLong(&ok);
+    return ok && bitrate >= 1'000'000 ? bitrate : 0;
+}
+
+QString ExportDialog::getTargetVideoBitrateLabel() const {
+    const qint64 bitrate = getTargetVideoBitrate();
+    if (bitrate <= 0) return "Bitrate tự động";
+    return QString("%1 Mbps").arg(static_cast<double>(bitrate) / 1'000'000.0, 0, 'f',
+        bitrate % 1'000'000 == 0 ? 0 : 1);
 }
 
 void ExportDialog::onResolutionChanged() {
@@ -230,10 +412,23 @@ void ExportDialog::onFormatChanged() {
 void ExportDialog::probeGpuEncoders() {
 #if defined(__EMSCRIPTEN__)
     hwAccelCombo_->clear();
-    hwAccelCombo_->addItem("Trình duyệt (WebCodecs)", "webcodecs");
+    hwAccelCombo_->addItem("WebCodecs (ưu tiên phần cứng)", "webcodecs");
     hwAccelCombo_->setEnabled(false);
-    gpuStatusLabel_->setText("Đang dùng bộ mã hóa do trình duyệt cung cấp.");
-    gpuStatusLabel_->setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 600;");
+    const bool gpuReady = EM_ASM_INT({ return Module.catchimGpuPreviewAvailable ? 1 : 0; }) != 0;
+    const int gpuStatus = EM_ASM_INT({ return Module.catchimWebGpuStatusCode || 0; });
+    QString gpuMessage;
+    if (gpuReady) gpuMessage = "WebGPU đang hoạt động; mã hóa video phần cứng tùy trình duyệt.";
+    else switch (gpuStatus) {
+        case 1: gpuMessage = "GPU chưa hoạt động: WebGPU cần HTTPS hoặc localhost."; break;
+        case 2: gpuMessage = "GPU chưa hoạt động: trình duyệt không hỗ trợ WebGPU; hãy dùng Chrome/Edge mới."; break;
+        case 3: gpuMessage = "GPU chưa hoạt động: không tạo được device. Cập nhật driver và bật Hardware acceleration."; break;
+        case 4: gpuMessage = "GPU chưa hoạt động: trình duyệt chỉ cấp GPU phần mềm. Kiểm tra driver và Hardware acceleration."; break;
+        case 5: gpuMessage = "GPU device có sẵn nhưng bộ ghép WebGPU không khởi tạo được. Cập nhật driver/trình duyệt."; break;
+        case 6: gpuMessage = "GPU bị trình duyệt ngắt. Hãy đóng tab khác đang dùng GPU rồi tải lại ứng dụng."; break;
+        default: gpuMessage = "Đang dùng CPU ghép hình: WebGPU không khởi tạo được trên máy này."; break;
+    }
+    gpuStatusLabel_->setText(gpuMessage);
+    gpuStatusLabel_->setStyleSheet(gpuReady ? "color: #22c55e; font-size: 11px; font-weight: 700;" : "color: #f59e0b; font-size: 11px; font-weight: 600;");
 #else
     // Locate FFmpeg binary
     QString ffmpegPath = "ffmpeg";
@@ -309,34 +504,65 @@ void ExportDialog::onCancelExport() {
         exportBtn_->setEnabled(false);
         cancelBtn_->setEnabled(false);
     } else {
+#if defined(__EMSCRIPTEN__)
+        if (browserDownloadReady_) {
+            EM_ASM({ Module.catchimExportDownload(); });
+            browserDownloadReady_=false;
+        }
+#endif
         reject();
     }
 }
 
 void ExportDialog::onWorkerProgress(int currentFrame, int totalFrames, double currentFps, int percent) {
     if (!isExporting_) return;
-    progressBar_->setValue(percent);
+    // Use one progress step per frame (rather than only 100 percentage steps),
+    // otherwise long exports look frozen for several seconds between updates.
+    progressBar_->setRange(0, std::max(1, totalFrames));
+    progressBar_->setValue(std::clamp(currentFrame, 0, std::max(1, totalFrames)));
 
-    QString hwAccel = formatCombo_->currentData().toString()=="webm"?"cpu":(hwAccelCombo_ ? hwAccelCombo_->currentData().toString() : "cpu");
+    QString hwAccel = hwAccelCombo_ ? hwAccelCombo_->currentData().toString() : "cpu";
+#if !defined(__EMSCRIPTEN__)
+    if (formatCombo_->currentData().toString()=="webm") hwAccel = "cpu";
+#endif
     QString hwDesc = (hwAccel == "amf") ? "AMD AMF GPU" :
                      ((hwAccel == "nvenc") ? "NVIDIA NVENC GPU" :
-                     ((hwAccel == "qsv") ? "Intel QSV GPU" : "CPU"));
+                     ((hwAccel == "qsv") ? "Intel QSV GPU" :
+                     ((hwAccel == "webcodecs") ? "WebCodecs (ưu tiên encoder phần cứng)" : "CPU")));
+#if defined(__EMSCRIPTEN__)
+    hwDesc = browserExportBackendDescription();
+    if (gpuStatusLabel_) {
+        const bool gpuCompositor = EM_ASM_INT({ return Module.catchimExportGpuEnabled ? 1 : 0; }) != 0;
+        const int encoderEfficiency = EM_ASM_INT({ return Module.catchimExportEncoderPowerEfficient === true ? 1 : Module.catchimExportEncoderPowerEfficient === false ? 0 : -1; });
+        gpuStatusLabel_->setText(gpuCompositor
+            ? (encoderEfficiency == 0 ? "Đang ghép hình trên GPU; Chrome báo encoder phần cứng không khả dụng/không hiệu quả." : "Đang ghép hình trên GPU; trạng thái encoder do trình duyệt quyết định.")
+            : "Đang dùng CPU ghép hình; GPU WebGPU không khởi tạo được hoặc project cần blend mode CPU.");
+        gpuStatusLabel_->setStyleSheet(gpuCompositor && encoderEfficiency == 1 ? "color: #22c55e; font-size: 11px; font-weight: 700;" : "color: #f59e0b; font-size: 11px; font-weight: 600;");
+    }
+#endif
 
     progressStatusLabel_->setText(QString("Đang xuất bằng %1: %2% (%3 / %4 khung hình)")
         .arg(hwDesc).arg(percent).arg(currentFrame).arg(totalFrames));
 
-    const auto& fpsSetting = engine_.project().settings().fps;
-    double fps = (fpsSetting.denominator > 0) ?
-        static_cast<double>(fpsSetting.numerator) / fpsSetting.denominator : 30.0;
-    if (fps <= 0.0) fps = 30.0;
+    const double fps = getTargetFrameRate();
 
     auto now = std::chrono::steady_clock::now();
     double elapsedSec = std::chrono::duration<double>(now - exportStartTime_).count();
-    double etaSec = (currentFps > 0.0 && currentFrame < totalFrames) ? (totalFrames - currentFrame) / currentFps : 0.0;
-    double speedMultiplier = currentFps / fps;
+    // Worker reports short-interval throughput, which varies with browser scheduling
+    // and encoder backpressure. Smooth the displayed rate and base ETA on whole-run
+    // throughput so both numbers do not jump on every progress update.
+    if (currentFps > 0.0) {
+        smoothedExportFps_ = smoothedExportFps_ <= 0.0
+            ? currentFps
+            : smoothedExportFps_ * 0.75 + currentFps * 0.25;
+    }
+    const double displayFps = smoothedExportFps_ > 0.0 ? smoothedExportFps_ : currentFps;
+    const double averageFps = elapsedSec > 0.0 && currentFrame > 0 ? currentFrame / elapsedSec : displayFps;
+    double etaSec = (averageFps > 0.0 && currentFrame < totalFrames) ? (totalFrames - currentFrame) / averageFps : 0.0;
+    double speedMultiplier = displayFps / fps;
 
     telemetryFpsLabel_->setText(QString("Tốc độ: %1 fps (%2x) • Đã chạy: %3 giây • Còn: ~%4 giây")
-        .arg(currentFps, 0, 'f', 1)
+        .arg(displayFps, 0, 'f', 1)
         .arg(speedMultiplier, 0, 'f', 1)
         .arg(static_cast<int>(elapsedSec))
         .arg(static_cast<int>(std::round(etaSec))));
@@ -363,14 +589,27 @@ void ExportDialog::onWorkerFinished(bool success, const QString& message) {
     cancelBtn_->setEnabled(true);
 
     if (success) {
-        progressBar_->setValue(100);
-        QString hwAccel = formatCombo_->currentData().toString()=="webm"?"cpu":(hwAccelCombo_ ? hwAccelCombo_->currentData().toString() : "cpu");
+        progressBar_->setValue(progressBar_->maximum());
+        QString hwAccel = hwAccelCombo_ ? hwAccelCombo_->currentData().toString() : "cpu";
+#if !defined(__EMSCRIPTEN__)
+        if (formatCombo_->currentData().toString()=="webm") hwAccel = "cpu";
+#endif
         QString hwDesc = (hwAccel == "amf") ? "AMD AMF GPU" :
                          ((hwAccel == "nvenc") ? "NVIDIA NVENC GPU" :
-                         ((hwAccel == "qsv") ? "Intel QSV GPU" : "CPU"));
+                         ((hwAccel == "qsv") ? "Intel QSV GPU" :
+                         ((hwAccel == "webcodecs") ? "WebCodecs (ưu tiên encoder phần cứng)" : "CPU")));
+#if defined(__EMSCRIPTEN__)
+        hwDesc = browserExportBackendDescription();
+#endif
         progressStatusLabel_->setText(QString("Đã xuất thành công bằng %1!").arg(hwDesc));
+#if defined(__EMSCRIPTEN__)
+        browserDownloadReady_=true;
+        showStatusMessage("Video đã sẵn sàng. Nhấn 'Tải video xuống' để lưu file.", "success");
+        cancelBtn_->setText("Tải video xuống");
+#else
         showStatusMessage(QString("Đã xuất thành công:\n%1").arg(message), "success");
         cancelBtn_->setText("Xong");
+#endif
     } else {
         progressStatusLabel_->setText("Xuất thất bại hoặc đã hủy.");
         showStatusMessage(message, "error");
@@ -392,29 +631,62 @@ void ExportDialog::onStartExport() {
         return;
     }
 
+    QStringList preflight;
+    const auto report = editor::ProjectDiagnostics::analyze(engine_.project());
+    if (report.gapCount() > 0)
+        preflight << QString("• Có %1 khoảng trống giữa các clip trên cùng rãnh.").arg(report.gapCount());
+    if (report.overlapCount > 0)
+        preflight << QString("• Có %1 đoạn clip chồng lấn trên cùng rãnh.").arg(report.overlapCount);
+    std::size_t missingAssets = 0;
+    std::size_t mutedTracks = 0;
+    for (const auto* track : tl->allTracks()) {
+        if (track->isMuted() && (track->type() == editor::TrackType::Audio || track->type() == editor::TrackType::Video))
+            ++mutedTracks;
+        for (const auto& clip : track->clips()) {
+            if (clip.mediaId().isEmpty()) continue;
+            const auto asset = mediaLibrary_.findAsset(clip.mediaId());
+            if (!asset || !std::filesystem::exists(asset->filePath())) ++missingAssets;
+        }
+    }
+    if (missingAssets > 0)
+        preflight << QString("• Không tìm thấy tệp nguồn của %1 clip.").arg(missingAssets);
+    if (mutedTracks > 0)
+        preflight << QString("• Có %1 rãnh âm thanh/video đang tắt tiếng.").arg(mutedTracks);
+    if (!preflight.isEmpty()) {
+        const auto answer = QMessageBox::warning(this, "Kiểm tra trước khi xuất",
+            "Phát hiện một số điều cần xem lại:\n\n" + preflight.join("\n") +
+                "\n\nBạn có muốn tiếp tục xuất không?",
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Yes);
+        if (answer != QMessageBox::Yes) return;
+    }
+
     QString fmt = formatCombo_->currentData().toString();
     QString ext = (fmt == "webm") ? "webm" : "mp4";
     QString defaultName = QString::fromStdString(engine_.project().name()) + "." + ext;
 
-    QString savePath = QFileDialog::getSaveFileName(
+    QString savePath;
+#if defined(__EMSCRIPTEN__)
+    savePath = QString::fromStdString(engine_.project().name()) + "." + ext;
+#else
+    savePath = QFileDialog::getSaveFileName(
         this,
         "Lưu video",
         defaultName,
         QString("Video (*.%1);;All Files (*.*)").arg(ext)
     );
+#endif
     if (savePath.isEmpty()) return;
 
     QSize targetSize = getTargetResolution();
     int width = targetSize.width();
     int height = targetSize.height();
 
-    const auto& fpsSetting = engine_.project().settings().fps;
-    double fps = (fpsSetting.denominator > 0) ?
-        static_cast<double>(fpsSetting.numerator) / fpsSetting.denominator : 30.0;
-    if (fps <= 0.0) fps = 30.0;
+    const double fps = getTargetFrameRate();
 
     int totalFrames = static_cast<int>(std::ceil(totalSec * fps));
     if (totalFrames <= 0) totalFrames = 1;
+    progressBar_->setRange(0, totalFrames);
+    progressBar_->setValue(0);
 
     QString quality = qualityCombo_->currentData().toString();
     QString crf = "23";
@@ -422,6 +694,16 @@ void ExportDialog::onStartExport() {
     else if (quality == "medium") crf = "23";
     else if (quality == "high") crf = "18";
     else if (quality == "very_high") crf = "14";
+    const qint64 selectedVideoBitrate = getTargetVideoBitrate();
+    const auto exportQuality = quality == "low" ? exporting::ExportQuality::Low
+        : quality == "medium" ? exporting::ExportQuality::Medium
+        : quality == "very_high" ? exporting::ExportQuality::VeryHigh
+        : exporting::ExportQuality::High;
+    const qint64 browserVideoBitrate = selectedVideoBitrate > 0
+        ? selectedVideoBitrate
+        : std::clamp<qint64>(exporting::ExportGeometryResolver::calculateVideoBitrate(width, height, fps, exportQuality),
+            1'000'000, 100'000'000);
+    const QString bitrateArg = QString::number(selectedVideoBitrate);
 
     // Locate FFmpeg
     QString ffmpegPath = "ffmpeg";
@@ -439,7 +721,7 @@ void ExportDialog::onStartExport() {
          << "-vcodec" << "rawvideo"
          << "-s" << QString("%1x%2").arg(width).arg(height)
          << "-pix_fmt" << "rgba"
-         << "-r" << QString::number(fps, 'f', 2)
+         << "-r" << QString::number(fps, 'f', 6)
          << "-i" << "-";
 
     if(!includeAudio)args<<"-an";
@@ -449,14 +731,20 @@ void ExportDialog::onStartExport() {
     if (fmt == "webm") {
         args << "-c:v" << "libvpx-vp9"
              << "-pix_fmt" << "yuv420p"
-             << "-deadline" << "good" << "-cpu-used" << "4" << "-row-mt" << "1"
-             << "-crf" << crf
-             << "-b:v" << "0";
+             << "-deadline" << "good" << "-cpu-used" << "4" << "-row-mt" << "1";
+        if (selectedVideoBitrate > 0) {
+            args << "-b:v" << bitrateArg
+                 << "-maxrate" << bitrateArg
+                 << "-bufsize" << QString::number(selectedVideoBitrate * 2);
+        } else {
+            args << "-crf" << crf << "-b:v" << "0";
+        }
     } else {
         if (hwAccel == "amf") {
             // AMD GPU (AMF/VCE) — optimized for maximum GPU saturation
             const double bpp=quality=="low"?.07:quality=="medium"?.12:quality=="very_high"?.28:.18;
-            const QString amfBitrate=QString::number(std::max<qint64>(250000,qRound64(double(width)*height*fps*bpp)));
+            const QString amfBitrate=selectedVideoBitrate > 0 ? bitrateArg
+                : QString::number(std::max<qint64>(250000,qRound64(double(width)*height*fps*bpp)));
             args << "-c:v" << "h264_amf"
                  << "-pix_fmt" << "yuv420p"
                  << "-quality" << "speed"
@@ -469,18 +757,24 @@ void ExportDialog::onStartExport() {
                  << "-pix_fmt" << "yuv420p"
                  << "-preset" << "p4"
                  << "-tune" << "hq"
-                 << "-rc" << "vbr"
-                 << "-cq" << crf;
+                 << "-rc" << "vbr";
+            if (selectedVideoBitrate > 0)
+                args << "-b:v" << bitrateArg << "-maxrate" << bitrateArg << "-bufsize" << QString::number(selectedVideoBitrate * 2);
+            else args << "-cq" << crf;
         } else if (hwAccel == "qsv") {
             args << "-c:v" << "h264_qsv"
                  << "-pix_fmt" << "nv12"
-                 << "-preset" << "medium"
-                 << "-global_quality" << crf;
+                 << "-preset" << "medium";
+            if (selectedVideoBitrate > 0)
+                args << "-b:v" << bitrateArg << "-maxrate" << bitrateArg << "-bufsize" << QString::number(selectedVideoBitrate * 2);
+            else args << "-global_quality" << crf;
         } else {
             args << "-c:v" << "libx264"
                  << "-pix_fmt" << "yuv420p"
-                 << "-preset" << "fast"
-                 << "-crf" << crf;
+                 << "-preset" << "fast";
+            if (selectedVideoBitrate > 0)
+                args << "-b:v" << bitrateArg << "-maxrate" << bitrateArg << "-bufsize" << QString::number(selectedVideoBitrate * 2);
+            else args << "-crf" << crf;
         }
     }
     args << savePath;
@@ -515,7 +809,8 @@ void ExportDialog::onStartExport() {
         args,
         savePath,
         this,
-        includeAudio
+        includeAudio,
+        browserVideoBitrate
     );
 
     connect(worker_, &ExportWorker::progressUpdated, this, &ExportDialog::onWorkerProgress);
@@ -523,6 +818,7 @@ void ExportDialog::onStartExport() {
     connect(worker_, &ExportWorker::exportFinished, this, &ExportDialog::onWorkerFinished);
 
     exportStartTime_ = std::chrono::steady_clock::now();
+    smoothedExportFps_ = 0.0;
     worker_->start();
 }
 

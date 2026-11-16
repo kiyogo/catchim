@@ -46,6 +46,10 @@ private:
     void setupUi();
     void updateInfoLabel();
     QSize getTargetResolution() const;
+    double getTargetAspectRatio() const;
+    double getTargetFrameRate() const;
+    qint64 getTargetVideoBitrate() const;
+    QString getTargetVideoBitrateLabel() const;
     // Probe available GPU encoders via FFmpeg and populate hwAccelCombo_
     void probeGpuEncoders();
 
@@ -54,8 +58,12 @@ private:
     render::RenderEngine& renderEngine_;
 
     QComboBox* resolutionCombo_{nullptr};
+    QComboBox* aspectRatioCombo_{nullptr};
+    QComboBox* frameRateCombo_{nullptr};
+    QComboBox* presetCombo_{nullptr};
     QComboBox* formatCombo_{nullptr};
     QComboBox* qualityCombo_{nullptr};
+    QComboBox* videoBitrateCombo_{nullptr};
     QComboBox* audioCombo_{nullptr};
     QComboBox* hwAccelCombo_{nullptr};  // GPU HW encoder selector
     QLabel* gpuStatusLabel_{nullptr};   // Shows detected GPU info
@@ -78,7 +86,9 @@ private:
 
     ExportWorker* worker_{nullptr};
     bool isExporting_{false};
+    bool browserDownloadReady_{false};
     std::chrono::steady_clock::time_point exportStartTime_;
+    double smoothedExportFps_{0.0};
 };
 
 } // namespace catchim::ui

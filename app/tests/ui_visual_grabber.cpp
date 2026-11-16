@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
             auto* resolution=dialog.findChild<QComboBox*>("exportResolution");
             resolution->setCurrentIndex(resolution->findData("1080p"));
             check("export-resolution-data",dialog.findChild<QLabel*>("exportOutputSize")->text().contains("1920 x 1080"));
-            for(const QString name:{"exportResolution","exportFormat","exportQuality","exportAudio"}){
+            for(const QString name:{"exportResolution","exportAspectRatio","exportFrameRate","exportFormat","exportQuality","exportBitrate","exportAudio"}){
                 auto* combo=dynamic_cast<catchim::ui::WebComboBox*>(dialog.findChild<QComboBox*>(name));check("export-select-"+name,combo!=nullptr);
                 if(combo){combo->showPopup();app.processEvents();combo->popupWidget()->grab().save(output+"/"+name+(mode==catchim::ui::ThemeMode::Light?"-light.png":"-dark.png"));combo->hidePopup();}
             }

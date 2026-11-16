@@ -1,4 +1,5 @@
 #include "ExportWorker.h"
+#include <algorithm>
 #include <cmath>
 #include "audio/AudioPlaybackEngine.h"
 #include "media/decoder/NativeVideoDecoder.h"
@@ -7,6 +8,10 @@
 #include <QDataStream>
 #include <QElapsedTimer>
 #include <QRegularExpression>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#include <emscripten/threading.h>
+#endif
 #if !defined(__EMSCRIPTEN__)
 #include <QProcess>
 #endif
@@ -28,7 +33,8 @@ ExportWorker::ExportWorker(
     const QStringList& ffmpegArgs,
     const QString& savePath,
     QObject* parent,
-    bool includeAudio
+    bool includeAudio,
+    qint64 videoBitrate
 )
     : QThread(parent)
     , project_(project)
@@ -40,6 +46,7 @@ ExportWorker::ExportWorker(
     , ffmpegArgs_(ffmpegArgs)
     , savePath_(savePath)
     , includeAudio_(includeAudio)
+    , videoBitrate_(videoBitrate)
 {
     for(const auto& asset:mediaLibrary.assets())mediaLibrary_.addAsset(std::make_shared<media::MediaAsset>(*asset));
 }
@@ -65,6 +72,7 @@ bool ExportWorker::tryDirectExport() {
     }
     if(!clip||clip->type()!=editor::ClipType::Video||clip->startTime().ticks()!=0||
         !clip->effects().empty()||!clip->masks().empty()||!clip->animationChannels().empty())return false;
+    if (!clip->getParam<std::string>("audio.processingPresetId", "").empty()) return false;
     for(const char* key:{"transform.positionX","transform.positionY","transform.rotate","adjustment.brightness","adjustment.contrast","adjustment.saturation","adjustment.temperature","adjustment.tint","audio.fadeIn","audio.fadeOut"})
         if(std::abs(clip->getParam<double>(key,0))>1e-6)return false;
     for(const char* key:{"transform.scaleX","transform.scaleY","opacity","speed"})if(std::abs(clip->getParam<double>(key,1)-1)>1e-6)return false;
@@ -74,6 +82,8 @@ bool ExportWorker::tryDirectExport() {
     if(clip->hasParam("transform.blendMode")&&clip->params()["transform.blendMode"]!=0&&clip->params()["transform.blendMode"]!="normal")return false;
     const auto asset=mediaLibrary_.findAsset(clip->mediaId());const auto canvas=project_.settings().canvasSize;
     if(!asset||asset->width()!=canvas.width||asset->height()!=canvas.height||!QFile::exists(QString::fromStdWString(asset->filePath().wstring())))return false;
+    if(width_<=0||height_<=0||canvas.width<=0||canvas.height<=0||
+        std::abs(static_cast<double>(width_)/height_-static_cast<double>(canvas.width)/canvas.height)>.001)return false;
     const int input=ffmpegArgs_.indexOf("-i");if(input<0||input+2>=ffmpegArgs_.size())return false;
     QStringList arguments={"-y","-filter_threads","2","-ss",QString::number(clip->trimStart().toSeconds(),'f',6),"-i",QString::fromStdWString(asset->filePath().wstring())};
     arguments<<"-map"<<"0:v:0"<<"-vf"<<QString("scale=%1:%2:flags=bilinear,setsar=1,fps=%3").arg(width_).arg(height_).arg(fps_,0,'f',6);
@@ -104,17 +114,158 @@ bool ExportWorker::tryDirectExport() {
 
 void ExportWorker::run() {
 #if defined(__EMSCRIPTEN__)
-    Q_UNUSED(project_);
-    Q_UNUSED(mediaLibrary_);
-    Q_UNUSED(width_);
-    Q_UNUSED(height_);
-    Q_UNUSED(fps_);
-    Q_UNUSED(totalFrames_);
     Q_UNUSED(ffmpegPath_);
     Q_UNUSED(ffmpegArgs_);
-    Q_UNUSED(savePath_);
-    Q_UNUSED(includeAudio_);
-    emit exportFinished(false, "Bộ xuất video WebCodecs/WebGPU chưa được tích hợp.");
+    if (cancelRequested_.load()) { emit exportFinished(false, "Đã hủy xuất."); return; }
+    render::RenderEngine renderer;
+    media::NativeVideoDecoder decoder;
+    decoder.setPreviewSize(width_, height_);
+    renderer.setVideoDecoder(&decoder);
+    renderer.setCanvasSize(width_, height_);
+    renderer.setFitSourceToOutput(true);
+    // WebGPU's current export shader supports normal alpha compositing. Keep
+    // advanced blend modes on the existing CPU renderer until their matching
+    // GPU shader is selected, rather than silently changing export appearance.
+    bool gpuLayerExportCompatible = true;
+    if (project_.settings().background.type == editor::ProjectBackground::Type::Blur)
+        gpuLayerExportCompatible = false;
+    if (project_.settings().background.color.find("gradient(") != std::string::npos)
+        gpuLayerExportCompatible = false;
+    const auto* exportTimeline = project_.activeTimeline();
+    if (!exportTimeline) gpuLayerExportCompatible = false;
+    else for (const auto* track : exportTimeline->allTracks()) {
+        if (!track || track->isHidden()) continue;
+        for (const auto& clip : track->clips()) {
+            if (clip.isHidden()) continue;
+            if (clip.getParam<bool>("isAdjustmentLayer", false)) { gpuLayerExportCompatible = false; break; }
+            if (clip.getParam<std::string>("transform.blendModeName", "normal") != "normal") { gpuLayerExportCompatible = false; break; }
+            if (clip.hasParam("transform.blendMode")) {
+                try { if (clip.getParam<int>("transform.blendMode", 0) != 0) { gpuLayerExportCompatible = false; break; } }
+                catch (...) { if (clip.getParam<std::string>("transform.blendMode", "normal") != "normal") { gpuLayerExportCompatible = false; break; } }
+            }
+        }
+        if (!gpuLayerExportCompatible) break;
+    }
+    std::atomic<uint32_t> bridgeResult{0};
+    std::atomic<uint32_t> gpuExportStatus{0};
+    QByteArray bridgeError(1024, '\0');
+    auto waitBridge = [&](const char* failure) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
+        while (bridgeResult.load(std::memory_order_acquire) == 0 && std::chrono::steady_clock::now() < deadline)
+            emscripten_futex_wait(reinterpret_cast<void*>(&bridgeResult), 0, 1000);
+        const auto result = bridgeResult.load(std::memory_order_acquire);
+        QString failureMessage = QString::fromUtf8(failure);
+        if (result != 1) {
+            const QString detail = QString::fromUtf8(bridgeError.constData()).trimmed();
+            emit logOutputReceived(detail.isEmpty()
+                ? QStringLiteral("WebCodecs: thao tác hết giờ hoặc lỗi. Kiểm tra codec/trình duyệt và bộ nhớ.")
+                : QStringLiteral("WebCodecs: ") + detail);
+            if (!detail.isEmpty()) failureMessage = detail;
+        }
+        bridgeError.fill('\0');
+        bridgeResult.store(0, std::memory_order_release);
+        if (result != 1) emit exportFinished(false, failureMessage);
+        return result == 1;
+    };
+    const QString format = savePath_.endsWith(".webm", Qt::CaseInsensitive) ? "webm" : "mp4";
+    const QByteArray pathUtf8 = savePath_.toUtf8();
+    MAIN_THREAD_ASYNC_EM_ASM({
+        Module.catchimExportBegin($0, $1, $2, $3, UTF8ToString($4), UTF8ToString($5), !!$6, $7, $8, !!$9, $10, $11);
+    }, width_, height_, fps_, totalFrames_, format.toUtf8().constData(), pathUtf8.constData(), includeAudio_, &bridgeResult, &gpuExportStatus, gpuLayerExportCompatible, bridgeError.data(), static_cast<int>(videoBitrate_));
+    if (!waitBridge("Không khởi động được bộ xuất WebCodecs.")) return;
+    const bool gpuExport = gpuExportStatus.load(std::memory_order_acquire) == 1;
+    renderer.setGpuLayerMode(gpuExport);
+    decoder.setBrowserGpuDirectMode(gpuExport);
+    decoder.setPlaybackMode(gpuExport);
+    decoder.setBrowserGpuPlaybackRate(gpuExport ? 0.1 : 1.0);
+    if (gpuExport) emit logOutputReceived("WebGPU: đang ghép các layer xuất video trực tiếp trên GPU.");
+    else if (!gpuLayerExportCompatible) emit logOutputReceived("WebGPU: nền mờ/gradient hoặc blend/adjustment layer cần bộ ghép CPU để giữ nguyên hình ảnh.");
+    else emit logOutputReceived("WebGPU: không khởi tạo được compositor phần cứng; dùng bộ ghép CPU dự phòng.");
+    const auto started = std::chrono::steady_clock::now();
+    auto previousGpuFrameFinished = started;
+    int lastReported = 0;
+    auto lastReport = started;
+    int audioRenderedFrames = 0;
+    audio::AudioPlaybackEngine audioMixer;
+    for (int frame = 0; frame < totalFrames_; ++frame) {
+        if (cancelRequested_.load()) {
+            MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); });
+            emit exportFinished(false, "Đã hủy xuất."); return;
+        }
+        const auto& rendered = renderer.renderFrame(project_, mediaLibrary_, core::TimelineTime::fromSeconds(static_cast<double>(frame) / fps_));
+        if (gpuExport) {
+            struct BrowserGpuLayer {
+                uint32_t pixels, videoKey;
+                int32_t width, height;
+                float x, y, scaleX, scaleY, rotation, opacity;
+                int32_t blend;
+            };
+            static_assert(sizeof(BrowserGpuLayer) == 44, "Update the WebGPU export layer descriptor layout.");
+            const auto layers = renderer.takeLastLayers();
+            std::vector<BrowserGpuLayer> descriptors;
+            descriptors.reserve(layers.size());
+            for (const auto& layer : layers) {
+                descriptors.push_back({
+                    layer.rgbaPixels.empty() ? 0u : static_cast<uint32_t>(reinterpret_cast<uintptr_t>(layer.rgbaPixels.data())),
+                    layer.browserVideoKey.empty() ? 0u : static_cast<uint32_t>(reinterpret_cast<uintptr_t>(layer.browserVideoKey.c_str())),
+                    layer.sourceWidth, layer.sourceHeight,
+                    static_cast<float>(layer.transform.positionX), static_cast<float>(layer.transform.positionY),
+                    static_cast<float>(layer.transform.scaleX), static_cast<float>(layer.transform.scaleY),
+                    static_cast<float>(layer.transform.rotate), static_cast<float>(layer.transform.opacity),
+                    layer.transform.blendMode == "normal" ? 0 : 1
+                });
+            }
+            const auto& background = project_.settings().background;
+            float red=0, green=0, blue=0;
+            if (background.type == editor::ProjectBackground::Type::Color && background.color.size() == 7 && background.color[0] == '#') {
+                try { red=std::stoi(background.color.substr(1,2),nullptr,16)/255.f; green=std::stoi(background.color.substr(3,2),nullptr,16)/255.f; blue=std::stoi(background.color.substr(5,2),nullptr,16)/255.f; } catch (...) {}
+            }
+            char gpuError[1024]{};
+            MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportGpuFrame($0, $1, $2, $3, $4, $5, $6, $7); },
+                descriptors.empty() ? nullptr : descriptors.data(), static_cast<int>(descriptors.size()), frame, red, green, blue, &bridgeResult, gpuError);
+            if (!waitBridge("WebCodecs không nhận được frame video.")) {
+                if (gpuError[0]) emit logOutputReceived(QStringLiteral("GPU/WebCodecs: ") + QString::fromUtf8(gpuError));
+                MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); });
+                return;
+            }
+        } else {
+            if (rendered.rgbaPixels.size() != static_cast<size_t>(width_) * height_ * 4) {
+                MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); });
+                emit exportFinished(false, "Frame dựng không đúng kích thước."); return;
+            }
+            MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportFrame($0, $1, $2, $3); }, rendered.rgbaPixels.data(), rendered.rgbaPixels.size(), frame, &bridgeResult);
+        }
+        if (!gpuExport && !waitBridge("WebCodecs không nhận được frame video.")) {
+            MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); }); return;
+        }
+        const int audioChunk = std::max(1, static_cast<int>(std::round(fps_)));
+        if (includeAudio_ && (frame + 1 >= audioRenderedFrames + audioChunk || frame == totalFrames_ - 1)) {
+            const int chunkFrames = std::min(totalFrames_ - audioRenderedFrames, audioChunk);
+            const auto* timeline = project_.activeTimeline();
+            if (!timeline) { emit exportFinished(false, "Không có timeline để xuất âm thanh."); return; }
+            const auto pcm = audioMixer.renderAudioSlice(*timeline, core::TimelineTime::fromSeconds(audioRenderedFrames / fps_), core::TimelineTime::fromSeconds(chunkFrames / fps_), 48000, &mediaLibrary_);
+            if (!pcm.samples().empty()) {
+                MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportAudio($0, $1, $2); }, pcm.samples().data(), pcm.samples().size(), &bridgeResult);
+                if (!waitBridge("Không thể mã hóa âm thanh.")) { MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportCancel(); }); return; }
+            }
+            audioRenderedFrames += chunkFrames;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (gpuExport) {
+            const double frameSeconds = std::chrono::duration<double>(now - previousGpuFrameFinished).count();
+            if (frameSeconds > .001) decoder.setBrowserGpuPlaybackRate(std::clamp(1.0 / frameSeconds / fps_, .0625, 16.0));
+            previousGpuFrameFinished = now;
+        }
+        if (now - lastReport >= std::chrono::milliseconds(200) || frame == totalFrames_ - 1) {
+            const double elapsed = std::chrono::duration<double>(now - lastReport).count();
+            emit progressUpdated(frame + 1, totalFrames_, (frame + 1 - lastReported) / std::max(.001, elapsed), (frame + 1) * 100 / totalFrames_);
+            lastReported = frame + 1; lastReport = now;
+        }
+    }
+    MAIN_THREAD_ASYNC_EM_ASM({ Module.catchimExportFinish($0); }, &bridgeResult);
+    if (!waitBridge("Không hoàn tất hoặc tải được file video.")) return;
+    emit progressUpdated(totalFrames_, totalFrames_, totalFrames_ / std::max(.001, std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()), 100);
+    emit exportFinished(true, "Video đã sẵn sàng để tải xuống.");
 #else
     if(cancelRequested_.load()){emit exportFinished(false,"Đã hủy xuất.");return;}
     if(tryDirectExport())return;
@@ -128,6 +279,7 @@ void ExportWorker::run() {
     media::NativeVideoDecoder decoder;decoder.setPreviewSize(width_,height_);
     renderEngine.setVideoDecoder(&decoder);
     renderEngine.setCanvasSize(width_, height_);
+    renderEngine.setFitSourceToOutput(true);
 
     QTemporaryDir temp;
     QStringList arguments=ffmpegArgs_;

@@ -29,7 +29,8 @@ public:
         const QStringList& ffmpegArgs,
         const QString& savePath,
         QObject* parent = nullptr,
-        bool includeAudio = false
+        bool includeAudio = false,
+        qint64 videoBitrate = 0
     );
     ~ExportWorker() override;
 
@@ -57,6 +58,7 @@ private:
     QStringList ffmpegArgs_;
     QString savePath_;
     bool includeAudio_{false};
+    qint64 videoBitrate_{0};
 
     std::atomic<bool> cancelRequested_{false};
 };

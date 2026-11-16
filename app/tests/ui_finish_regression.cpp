@@ -166,19 +166,29 @@ int main(int argc,char** argv){
             for(const QString format:{"mp4","webm"}){
                 ui::ExportDialog dialog(engine,library,renderer,&window);dialog.show();app.processEvents();
                 const bool withAudio=format=="webm";const QString resolution=withAudio?"720p":"480p";
-                for(const auto& choice:std::vector<std::pair<QString,QString>>{{"exportResolution",resolution},{"exportFormat",format},{"exportQuality",withAudio?"medium":"low"},{"exportAudio",withAudio?"include":"mute"}}){
+                for(const auto& choice:std::vector<std::pair<QString,QString>>{{"exportResolution",resolution},{"exportAspectRatio",withAudio?"9:16":"16:9"},{"exportFormat",format},{"exportQuality",withAudio?"medium":"low"},{"exportAudio",withAudio?"include":"mute"}}){
                     auto* combo=dialog.findChild<QComboBox*>(choice.first);combo->setCurrentIndex(combo->findData(choice.second));
                 }
+                auto* bitrate=dialog.findChild<QComboBox*>("exportBitrate");
+                const qint64 requestedBitrate=withAudio?5'000'000:8'000'000;
+                bitrate->setCurrentIndex(bitrate->findText(withAudio?"5 Mbps":"8 Mbps"));
+                check(format+"-fixed-bitrate-disables-quality",bitrate->currentData().toLongLong()==requestedBitrate&&!dialog.findChild<QComboBox*>("exportQuality")->isEnabled());
+                auto* frameRate=dialog.findChild<QComboBox*>("exportFrameRate");
+                const QString requestedFps=format=="mp4"?"25 fps":"30 fps";
+                frameRate->setCurrentIndex(frameRate->findText(requestedFps, Qt::MatchStartsWith));
+                check(format+"-frame-rate-selection",frameRate->currentText().startsWith(requestedFps));
                 const QString path=output+"/form-"+format+"."+format;
                 QTimer::singleShot(0,&dialog,[&]{auto* save=qobject_cast<QFileDialog*>(QApplication::activeModalWidget());check(format+"-save-dialog-opens",save!=nullptr);if(save){save->selectFile(path);QMetaObject::invokeMethod(save,"accept");}});
                 dialog.findChild<QPushButton*>("startExportButton")->click();
                 app.processEvents();dialog.grab().save(output+"/export-progress-"+format+".png");
-                check(format+"-form-export-finishes",until([&]{return dialog.findChild<QPushButton*>("startExportButton")->isEnabled();},60000)&&dialog.findChild<QProgressBar*>()->value()==100);
-                QProcess inspect;inspect.start(QStandardPaths::findExecutable("ffprobe"),{"-v","error","-show_entries","stream=codec_name,codec_type,width,height:format=duration","-of","json",path});inspect.waitForFinished(5000);
+                check(format+"-form-export-finishes",until([&]{return dialog.findChild<QPushButton*>("startExportButton")->isEnabled();},60000)&&dialog.findChild<QProgressBar*>()->value()==dialog.findChild<QProgressBar*>()->maximum());
+                QProcess inspect;inspect.start(QStandardPaths::findExecutable("ffprobe"),{"-v","error","-show_entries","stream=codec_name,codec_type,width,height,avg_frame_rate:format=duration","-of","json",path});inspect.waitForFinished(5000);
                 const auto document=QJsonDocument::fromJson(inspect.readAllStandardOutput()).object();bool audioFound=false,videoFound=false;
-                const int height=withAudio?720:480,width=qRound((height*2030./1080)/2)*2;
-                for(const auto& value:document.value("streams").toArray()){const auto stream=value.toObject();audioFound|=stream.value("codec_type").toString()=="audio";videoFound|=stream.value("codec_type").toString()=="video"&&stream.value("width").toInt()==width&&stream.value("height").toInt()==height&&stream.value("codec_name").toString()==(withAudio?"vp9":"h264");}
-                check(format+"-form-resolution-format-audio-correct",videoFound&&audioFound==withAudio&&std::abs(document.value("format").toObject().value("duration").toString().toDouble()-2.)<.15);
+                const int height=withAudio?720:480,width=withAudio?406:854;
+                QString actualFps;
+                for(const auto& value:document.value("streams").toArray()){const auto stream=value.toObject();audioFound|=stream.value("codec_type").toString()=="audio";if(stream.value("codec_type").toString()=="video"){actualFps=stream.value("avg_frame_rate").toString();videoFound=stream.value("width").toInt()==width&&stream.value("height").toInt()==height&&stream.value("codec_name").toString()==(withAudio?"vp9":"h264");}}
+                const QString expectedFps=withAudio?"30/1":"25/1";
+                check(format+"-form-resolution-format-audio-frame-rate-correct",videoFound&&audioFound==withAudio&&actualFps==expectedFps&&std::abs(document.value("format").toObject().value("duration").toString().toDouble()-2.)<.15);
                 dialog.reject();
             }
             engine.activeTimeline()->findClip(id)->setDuration(original);
