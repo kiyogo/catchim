@@ -32,6 +32,102 @@
         window.addEventListener("keydown", unlock, { capture: true });
     }
 
+    // Decode only packets around the requested source time for playback.
+    // Full-file decoding below remains available for export.
+    const windowInputs = new Map();
+    function getAudioWindow(entry, start, end, sampleRate, frames) {
+        const key = `${start}/${end}/${sampleRate}/${frames}`;
+        const existing = entry.windows.get(key);
+        if (existing) return existing;
+        const promise = (async () => {
+            const samples = new Float32Array(frames * 2);
+            const sink = new window.CatchimMedia.AudioBufferSink(entry.track);
+            let lastYield = performance.now();
+            let previousEnd = null, previousLast = 0;
+            for await (const item of sink.buffers(start, end)) {
+                const buffer = item.buffer;
+                const left = buffer.getChannelData(0);
+                const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : left;
+                // WebCodecs timestamps are rounded to microseconds. Snap both
+                // packet edges to the same output sample grid so adjacent AAC
+                // packets do not leave single-sample holes at their boundary.
+                const contiguous = previousEnd !== null && Math.abs(item.timestamp - previousEnd) <= 0.000002;
+                const first = contiguous ? previousLast : Math.max(0, Math.min(frames, Math.round((item.timestamp - start) * sampleRate)));
+                const last = Math.max(0, Math.min(frames, Math.round((item.timestamp + buffer.duration - start) * sampleRate)));
+                previousEnd = item.timestamp + buffer.duration;
+                previousLast = last;
+                for (let frame = first; frame < last; ++frame) {
+                    const position = (start + frame / sampleRate - item.timestamp) * buffer.sampleRate;
+                    const a = Math.max(0, Math.min(left.length - 1, Math.floor(position)));
+                    const b = Math.min(left.length - 1, a + 1);
+                    const t = Math.max(0, Math.min(1, position - a));
+                    const index = frame * 2;
+                    samples[index] = left[a] + (left[b] - left[a]) * t;
+                    samples[index + 1] = right[a] + (right[b] - right[a]) * t;
+                    if ((frame & 8191) === 8191 && performance.now() - lastYield >= 4) {
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                        lastYield = performance.now();
+                    }
+                }
+                if (performance.now() - lastYield >= 4) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                    lastYield = performance.now();
+                }
+            }
+            return samples;
+        })();
+        entry.windows.set(key, promise);
+        promise.catch(() => { if (entry.windows.get(key) === promise) entry.windows.delete(key); });
+        while (entry.windows.size > 3) entry.windows.delete(entry.windows.keys().next().value);
+        return promise;
+    }
+    Module.catchimDecodeAudioWindow = async function (path, start, end, sampleRate, outputPtr, frames, donePtr, okPtr) {
+        try {
+            const api = window.CatchimMedia;
+            if (!api?.Input || !api?.CustomSource || !api?.AudioBufferSink) throw new Error('Audio window decoder is unavailable.');
+            let entry = windowInputs.get(path);
+            if (!entry) {
+                const input = new api.Input({ formats: api.ALL_FORMATS, source: new api.CustomSource({
+                    getSize: () => FS.stat(path).size,
+                    read: (first, last) => {
+                        const bytes = new Uint8Array(last - first);
+                        const file = FS.open(path, 'r');
+                        try {
+                            const count = FS.read(file, bytes, 0, bytes.length, first);
+                            return count === bytes.length ? bytes : bytes.subarray(0, count);
+                        } finally { FS.close(file); }
+                    },
+                    maxCacheSize: 8 * 1024 * 1024,
+                }) });
+                entry = { input, track: null, duration: null, windows: new Map() };
+                const track = await input.getPrimaryAudioTrack();
+                if (!track || !await track.canDecode()) { input.dispose(); throw new Error('Audio track cannot be decoded.'); }
+                entry.track = track;
+                try { entry.duration = await input.getDurationFromMetadata?.([track]) ?? null; }
+                catch (_) { entry.duration = null; }
+                windowInputs.set(path, entry);
+                if (windowInputs.size > 8) {
+                    const oldest = windowInputs.keys().next().value;
+                    windowInputs.get(oldest).input.dispose();
+                    windowInputs.delete(oldest);
+                }
+            }
+            const samples = await getAudioWindow(entry, start, end, sampleRate, frames);
+            HEAPF32.set(samples, outputPtr >> 2);
+            Atomics.store(HEAPU32, okPtr >> 2, 1);
+            // Prepare the next overlapping window after the current one is
+            // ready; failure is handled when that window is requested.
+            if (Number.isFinite(entry.duration) && end < entry.duration)
+                setTimeout(() => { if (!entry.input.disposed) getAudioWindow(entry, start + 2, end + 2, sampleRate, frames).catch(() => {}); }, 500);
+        } catch (error) {
+            console.warn('[Catchim] Audio window decode failed:', path, error);
+            Atomics.store(HEAPU32, okPtr >> 2, 0);
+        } finally {
+            Atomics.store(HEAPU32, donePtr >> 2, 1);
+            Atomics.notify(HEAP32, donePtr >> 2);
+        }
+    };
+
     Module.catchimDecodeAudio = async function (path, sampleRate, channels, resultPtr, framesPtr, donePtr, okPtr) {
         let allocated = 0;
         try {

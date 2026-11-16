@@ -46,7 +46,42 @@ NativeAudioDecoder::~NativeAudioDecoder() {
 void NativeAudioDecoder::clearCache() {
     std::lock_guard<std::mutex> lock(mutex_);
     cache_.clear();
+    windowCache_.clear();
     failedCache_.clear();
+}
+
+std::shared_ptr<const std::vector<float>> NativeAudioDecoder::getAudioWindow(
+    const std::filesystem::path& path, double startSeconds, double endSeconds,
+    double& windowStart, int targetSampleRate, int targetChannels)
+{
+#if defined(__EMSCRIPTEN__) && defined(__EMSCRIPTEN_PTHREADS__)
+    if (targetSampleRate <= 0 || targetChannels != 2 || !std::isfinite(startSeconds) || !std::isfinite(endSeconds)) return nullptr;
+    windowStart = std::max(0.0, std::floor(startSeconds / 2.0) * 2.0);
+    const double windowEnd = std::max(windowStart + 4.0, std::ceil(endSeconds / 2.0) * 2.0);
+    const auto frames = static_cast<size_t>(std::ceil((windowEnd - windowStart) * targetSampleRate));
+    if (frames > static_cast<size_t>(targetSampleRate) * 60) return nullptr;
+    const auto key = path.string() + "@window/" + std::to_string(targetSampleRate) + "/" +
+        std::to_string(static_cast<int64_t>(windowStart * targetSampleRate)) + "/" + std::to_string(frames);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (auto it = windowCache_.find(key); it != windowCache_.end()) return it->second;
+    auto pcm = std::make_shared<std::vector<float>>(frames * targetChannels, 0.f);
+    std::atomic<uint32_t> completed{0}, succeeded{0};
+    const auto utf8 = path.u8string();
+    const std::string pathUtf8(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+    MAIN_THREAD_ASYNC_EM_ASM({
+        Module.catchimDecodeAudioWindow(UTF8ToString($0), $1, $2, $3, $4, $5, $6, $7);
+    }, pathUtf8.c_str(), windowStart, windowEnd, targetSampleRate, pcm->data(),
+       frames, reinterpret_cast<uintptr_t>(&completed), reinterpret_cast<uintptr_t>(&succeeded));
+    while (completed.load(std::memory_order_acquire) == 0)
+        emscripten_futex_wait(reinterpret_cast<void*>(&completed), 0, 1000);
+    if (!succeeded.load(std::memory_order_acquire)) return nullptr;
+    if (windowCache_.size() >= 8) windowCache_.clear();
+    windowCache_[key] = pcm;
+    return pcm;
+#else
+    windowStart = 0;
+    return getAudioBuffer(path, targetSampleRate, targetChannels);
+#endif
 }
 
 std::shared_ptr<const std::vector<float>> NativeAudioDecoder::getAudioBuffer(

@@ -8,6 +8,7 @@
 #include "editor/history/commands/ElementCommands.h"
 #include "editor/history/commands/TrackCommands.h"
 #include "editor/history/commands/BatchCommand.h"
+#include "media/decoder/NativeAudioDecoder.h"
 #include "media/decoder/NativeVideoDecoder.h"
 #include "audio/AudioPlaybackEngine.h"
 #include <QApplication>
@@ -39,6 +40,7 @@
 #include <QToolTip>
 #include <QHelpEvent>
 #include <cmath>
+#include <limits>
 
 namespace catchim::ui {
 
@@ -55,11 +57,105 @@ TimelineTracksWidget::TimelineTracksWidget(
     setAcceptDrops(true);
     setAttribute(Qt::WA_OpaquePaintEvent);
     thumbnailPool_.setMaxThreadCount(1);
+    waveformPool_.setMaxThreadCount(1);
 }
 
 TimelineTracksWidget::~TimelineTracksWidget() {
+    waveformGenerationPaused_.store(true, std::memory_order_release);
     thumbnailPool_.clear();
     thumbnailPool_.waitForDone();
+    waveformPool_.clear();
+    waveformPool_.waitForDone();
+}
+
+static std::shared_ptr<media::WaveformData> buildAudioWaveform(
+    const core::MediaId& mediaId,
+    const std::filesystem::path& path,
+    double durationSeconds,
+    const std::atomic_bool& paused) {
+    constexpr int sampleRate = 44100;
+    constexpr int channels = 2;
+    constexpr size_t samplesPerBucket = 512;
+    if (!std::isfinite(durationSeconds) || durationSeconds <= 0.0) return {};
+
+    const double frameCountValue = std::ceil(durationSeconds * sampleRate);
+    if (!std::isfinite(frameCountValue) || frameCountValue <= 0.0 ||
+        frameCountValue > static_cast<double>(std::numeric_limits<size_t>::max())) return {};
+    const size_t frameCount = static_cast<size_t>(frameCountValue);
+    const size_t bucketCount = (frameCount + samplesPerBucket - 1) / samplesPerBucket;
+    if (bucketCount == 0 || bucketCount > 8 * 1024 * 1024) return {};
+
+    std::vector<float> peaks(bucketCount, 0.0f);
+    const auto accumulate = [&peaks, frameCount](const std::vector<float>& interleaved, size_t firstFrame) {
+        const size_t frames = interleaved.size() / channels;
+        for (size_t i = 0; i < frames; ++i) {
+            const size_t frame = firstFrame + i;
+            if (frame >= frameCount) break;
+            const float left = interleaved[i * channels];
+            const float right = interleaved[i * channels + 1];
+            const float leftPeak = std::isfinite(left) ? std::abs(left) : 0.0f;
+            const float rightPeak = std::isfinite(right) ? std::abs(right) : 0.0f;
+            auto& peak = peaks[frame / samplesPerBucket];
+            peak = std::max(peak, std::max(leftPeak, rightPeak));
+        }
+    };
+
+    auto& decoder = media::NativeAudioDecoder::instance();
+#if defined(__EMSCRIPTEN__) && defined(__EMSCRIPTEN_PTHREADS__)
+    for (double start = 0.0; start < durationSeconds; start += 4.0) {
+        if (paused.load(std::memory_order_acquire)) return {};
+        double windowStart = 0.0;
+        const double end = std::min(durationSeconds, start + 4.0);
+        const auto pcm = decoder.getAudioWindow(path, start, end, windowStart, sampleRate, channels);
+        if (!pcm || pcm->empty()) return {};
+        const size_t firstFrame = static_cast<size_t>(std::max(0.0, std::round(windowStart * sampleRate)));
+        accumulate(*pcm, firstFrame);
+    }
+#else
+    if (paused.load(std::memory_order_acquire)) return {};
+    const auto pcm = decoder.getAudioBuffer(path, sampleRate, channels);
+    if (!pcm || pcm->empty()) return {};
+    accumulate(*pcm, 0);
+#endif
+
+    if (paused.load(std::memory_order_acquire)) return {};
+    auto data = std::make_shared<media::WaveformData>();
+    data->mediaId = mediaId;
+    data->sampleRate = sampleRate;
+    data->samplesPerBucket = static_cast<int32_t>(samplesPerBucket);
+    data->buckets.reserve(peaks.size());
+    for (const float peak : peaks) data->buckets.push_back({-peak, peak});
+    return data;
+}
+
+void TimelineTracksWidget::requestWaveform(
+    const core::MediaId& mediaId,
+    const std::filesystem::path& path,
+    double durationSeconds) {
+    const QString key = QString::fromStdString(mediaId.str());
+    if (key.isEmpty() || pendingWaveforms_.contains(key) || failedWaveforms_.contains(key) ||
+        pendingWaveforms_.size() >= 3 || waveformGenerationPaused_.load(std::memory_order_acquire)) return;
+
+    pendingWaveforms_.insert(key);
+    const QPointer<TimelineTracksWidget> target(this);
+    waveformPool_.start(QRunnable::create([target, mediaId, path, durationSeconds, key, this] {
+#ifdef _WIN32
+        const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+#endif
+        auto waveform = buildAudioWaveform(mediaId, path, durationSeconds, waveformGenerationPaused_);
+        const bool cancelled = waveformGenerationPaused_.load(std::memory_order_acquire);
+        const bool failed = !cancelled && !waveform;
+        if (waveform) media::WaveformGenerator::instance().cacheWaveform(mediaId, std::move(waveform));
+        QMetaObject::invokeMethod(qApp, [target, key, failed] {
+            if (!target) return;
+            target->pendingWaveforms_.remove(key);
+            if (failed) target->failedWaveforms_.insert(key);
+            target->update();
+        }, Qt::QueuedConnection);
+#ifdef _WIN32
+        if (SUCCEEDED(com)) CoUninitialize();
+#endif
+    }));
 }
 
 QImage TimelineTracksWidget::thumbnail(const editor::Clip& clip,double sourceTime) {
@@ -235,6 +331,7 @@ void TimelineTracksWidget::paintEvent(QPaintEvent* /* event */) {
     painter.fillRect(rect(), palette.panelBackground);
 
     auto* tl = engine_.activeTimeline();
+    waveformGenerationPaused_.store(engine_.playback().isPlaying(), std::memory_order_release);
     if (!tl) return;
 
     int yOffset = Metrics::timelineContentTopPadding - scrollY_;
@@ -321,6 +418,11 @@ void TimelineTracksWidget::paintEvent(QPaintEvent* /* event */) {
             // Draw Audio Waveform & Volume line if audio clip
             if (clip.type() == editor::ClipType::Audio) {
                 auto wf = media::WaveformGenerator::instance().getWaveform(clip.mediaId());
+                if (!wf && !clip.mediaId().isEmpty()) {
+                    const auto asset = mediaLibrary_.findAsset(clip.mediaId());
+                    if (asset && asset->type() == media::MediaType::Audio)
+                        requestWaveform(asset->id(), asset->filePath(), asset->duration().toSeconds());
+                }
                 double volLinear = audio::AudioPlaybackEngine::resolveEffectiveAudioGain(clip,track->isMuted(),core::TimelineTime(0));
                 std::vector<double> gainSamples = { volLinear };
 

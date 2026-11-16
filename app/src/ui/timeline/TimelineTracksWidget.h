@@ -7,6 +7,8 @@
 #include <QSet>
 #include <QThreadPool>
 #include <QElapsedTimer>
+#include <atomic>
+#include <filesystem>
 #include "editor/EditorEngine.h"
 #include "media/MediaLibrary.h"
 
@@ -66,6 +68,9 @@ private:
     core::TimelineTime pixelToTime(int pixelX) const;
     int timeToPixel(core::TimelineTime time) const;
     QImage thumbnail(const editor::Clip& clip, double sourceTime);
+    void requestWaveform(const core::MediaId& mediaId,
+                         const std::filesystem::path& path,
+                         double durationSeconds);
 
     editor::EditorEngine& engine_;
     media::MediaLibrary& mediaLibrary_;
@@ -90,6 +95,10 @@ private:
     QHash<QString,QImage> thumbnailCovers_;
     QSet<QString> pendingThumbnails_;
     QThreadPool thumbnailPool_;
+    QSet<QString> pendingWaveforms_;
+    QSet<QString> failedWaveforms_;
+    QThreadPool waveformPool_;
+    std::atomic_bool waveformGenerationPaused_{false};
 };
 
 } // namespace catchim::ui

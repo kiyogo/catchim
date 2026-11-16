@@ -32,10 +32,16 @@ public:
         int targetChannels = 2
     );
 
+    // Decode a bounded source-time window for interactive playback and analysis.
+    std::shared_ptr<const std::vector<float>> getAudioWindow(
+        const std::filesystem::path& path, double startSeconds, double endSeconds,
+        double& windowStart, int targetSampleRate = 48000, int targetChannels = 2);
+
     void clearCache();
 
 private:
     std::unordered_map<std::string, std::shared_ptr<std::vector<float>>> cache_;
+    std::unordered_map<std::string, std::shared_ptr<std::vector<float>>> windowCache_;
     std::unordered_set<std::string> failedCache_;
     std::mutex mutex_;
 };
