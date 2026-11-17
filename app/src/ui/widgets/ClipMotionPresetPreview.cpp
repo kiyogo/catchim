@@ -3,6 +3,7 @@
 #if defined(HAVE_QT6)
 #include "render/TransitionEngine.h"
 #include "render/Transform.h"
+#include <QCache>
 #include <QHash>
 #include <QImage>
 #include <QPainter>
@@ -13,29 +14,35 @@
 namespace catchim::ui {
 namespace {
 QImage motionPreviewSource() {
-    constexpr int width = 180;
-    constexpr int height = 102;
-    QImage source(":/web/effects/preview.jpg");
-    if (source.isNull()) {
-        source = QImage(width, height, QImage::Format_RGBA8888);
-        source.fill(QColor("#52a9bd"));
-    }
-    source = source.scaled(width, height, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    return source.copy((source.width() - width) / 2, (source.height() - height) / 2, width, height)
-        .convertToFormat(QImage::Format_RGBA8888);
+    static const QImage source = [] {
+        constexpr int width = 180;
+        constexpr int height = 102;
+        QImage image(":/web/effects/preview.jpg");
+        if (image.isNull()) {
+            image = QImage(width, height, QImage::Format_RGBA8888);
+            image.fill(QColor("#52a9bd"));
+        }
+        image = image.scaled(width, height, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        return image.copy((image.width() - width) / 2, (image.height() - height) / 2, width, height)
+            .convertToFormat(QImage::Format_RGBA8888);
+    }();
+    return source;
 }
 } // namespace
 
-QPixmap clipMotionPresetPreview(const QString& slot, const QString& type, double loopPeriodSeconds) {
-    static QHash<QString, QPixmap> cache;
+QPixmap clipMotionPresetPreview(const QString& slot, const QString& type,
+                                double loopPeriodSeconds, double progress) {
+    static QCache<QString, QPixmap> cache(48);
+    progress = std::clamp(progress, 0.0, 1.0);
     const QString cacheKey = slot + QLatin1Char(':') + type + QLatin1Char(':') +
-        QString::number(loopPeriodSeconds, 'f', 3);
-    if (cache.contains(cacheKey)) return cache.value(cacheKey);
+        QString::number(loopPeriodSeconds, 'f', 2) + QLatin1Char(':') +
+        QString::number(progress, 'f', 3);
+    if (const auto* cached = cache.object(cacheKey)) return *cached;
     QImage source = motionPreviewSource();
     QPixmap pixmap(source.size());
     pixmap.fill(QColor("#d1d5db"));
     const QRectF bounds(pixmap.rect());
-    constexpr double sampleProgress = .43;
+    const double sampleProgress = progress;
     QImage previewImage = source;
     QImage outgoing = source.mirrored(true, false);
     QPainter painter(&pixmap);
@@ -108,7 +115,7 @@ QPixmap clipMotionPresetPreview(const QString& slot, const QString& type, double
                 wipeProgress, wipeFromRight, &wipeMode);
         } else {
             render::TransitionEngine::applyClipLoopMotion(
-                transform, rawType, .13, loopPeriodSeconds, 1.0, 1.0);
+                transform, rawType, sampleProgress * loopPeriodSeconds, loopPeriodSeconds, 1.0, 1.0);
         }
         if (wipeProgress >= 0.0) {
             std::vector<uint8_t> pixels(static_cast<size_t>(source.width()) * source.height() * 4);
@@ -126,7 +133,7 @@ QPixmap clipMotionPresetPreview(const QString& slot, const QString& type, double
         painter.drawImage(QRectF(-bounds.width() * .5, -bounds.height() * .5,
                                  bounds.width(), bounds.height()), previewImage);
     }
-    cache.insert(cacheKey, pixmap);
+    cache.insert(cacheKey, new QPixmap(pixmap));
     return pixmap;
 }
 
